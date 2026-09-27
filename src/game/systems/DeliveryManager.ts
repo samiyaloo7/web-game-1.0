@@ -5,6 +5,7 @@ import {
   SessionDeliveryStats,
 } from '../types/delivery';
 import { PACKAGE_CATALOG, SECTOR_LOCATIONS } from '../data/deliveryData';
+import { EventBus } from '../EventBus';
 
 export type DeliveryEventCallback = (mission: ActiveMission) => void;
 
@@ -25,6 +26,7 @@ export class DeliveryManager {
   };
 
   private onMissionUpdated?: DeliveryEventCallback;
+  private lastEmittedSecond: number = -1;
 
   constructor(onMissionUpdated?: DeliveryEventCallback) {
     this.onMissionUpdated = onMissionUpdated;
@@ -69,6 +71,7 @@ export class DeliveryManager {
     };
 
     this.currentMission = mission;
+    this.lastEmittedSecond = Math.ceil(timeLimitSeconds);
     this.notifyUpdate();
     return mission;
   }
@@ -82,6 +85,7 @@ export class DeliveryManager {
     }
 
     this.currentMission.status = 'in_transit';
+    this.lastEmittedSecond = Math.ceil(this.currentMission.remainingTimeSeconds);
     this.notifyUpdate();
     return true;
   }
@@ -117,6 +121,7 @@ export class DeliveryManager {
     this.sessionStats.totalXpEarned += finalXp;
 
     this.notifyUpdate();
+    this.emitStatsUpdate();
     return true;
   }
 
@@ -133,10 +138,20 @@ export class DeliveryManager {
       this.currentMission.remainingTimeSeconds - deltaSeconds
     );
 
+    // Quantized 1-second interval check for React HUD
+    const currentSecondInt = Math.ceil(this.currentMission.remainingTimeSeconds);
+    if (currentSecondInt !== this.lastEmittedSecond) {
+      this.lastEmittedSecond = currentSecondInt;
+      EventBus.emitEvent('mission:tick', {
+        remainingTimeSeconds: currentSecondInt,
+      });
+    }
+
     if (this.currentMission.remainingTimeSeconds <= 0) {
       this.currentMission.status = 'failed';
       this.sessionStats.failedCount += 1;
       this.notifyUpdate();
+      this.emitStatsUpdate();
     }
   }
 
@@ -148,9 +163,34 @@ export class DeliveryManager {
     return { ...this.sessionStats };
   }
 
+  public emitStatsUpdate(): void {
+    const score = this.sessionStats.totalCreditsEarned + this.sessionStats.totalXpEarned * 2;
+    EventBus.emitEvent('stats:updated', {
+      credits: this.sessionStats.totalCreditsEarned,
+      xp: this.sessionStats.totalXpEarned,
+      score,
+      completedCount: this.sessionStats.completedCount,
+      failedCount: this.sessionStats.failedCount,
+    });
+  }
+
   private notifyUpdate(): void {
-    if (this.currentMission && this.onMissionUpdated) {
+    if (!this.currentMission) return;
+
+    if (this.onMissionUpdated) {
       this.onMissionUpdated(this.currentMission);
     }
+
+    EventBus.emitEvent('mission:updated', {
+      status: this.currentMission.status,
+      packageName: this.currentMission.packageDef.name,
+      cargoCategory: `${this.currentMission.packageDef.weightCategory.toUpperCase()} • ${this.currentMission.packageDef.fragility.toUpperCase()}`,
+      pickupZone: this.currentMission.pickupLocation.zone,
+      destinationName: this.currentMission.dropoffLocation.name,
+      destinationZone: this.currentMission.dropoffLocation.zone,
+      timeLimitSeconds: this.currentMission.timeLimitSeconds,
+      remainingTimeSeconds: Math.ceil(this.currentMission.remainingTimeSeconds),
+      distance: this.currentMission.calculatedDistance,
+    });
   }
 }

@@ -5,6 +5,7 @@ import { DestinationPad } from '../entities/DestinationPad';
 import { InputManager } from '../systems/InputManager';
 import { DeliveryManager } from '../systems/DeliveryManager';
 import { ActiveMission } from '../types/delivery';
+import { EventBus } from '../EventBus';
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
@@ -13,16 +14,25 @@ export class GameScene extends Phaser.Scene {
   private activePackageDrop: PackageDrop | null = null;
   private activeDestinationPad: DestinationPad | null = null;
   private guideArrow!: Phaser.GameObjects.Graphics;
-  private missionPanel!: Phaser.GameObjects.Container;
-  private missionStatusText!: Phaser.GameObjects.Text;
-  private missionDetailsText!: Phaser.GameObjects.Text;
-  private timerText!: Phaser.GameObjects.Text;
-  private scoreText!: Phaser.GameObjects.Text;
   private notificationBanner!: Phaser.GameObjects.Container;
   private bannerTitle!: Phaser.GameObjects.Text;
   private bannerSub!: Phaser.GameObjects.Text;
   private bannerBg!: Phaser.GameObjects.Graphics;
   private nextMissionCooldownTimer: number = 0;
+  private isPaused: boolean = false;
+
+  // Bound command handler references for clean removal
+  private handleTogglePauseCommand = (): void => {
+    this.togglePause();
+  };
+
+  private handleSetPauseCommand = (data: { paused: boolean }): void => {
+    this.setPaused(data.paused);
+  };
+
+  private handleRestartMissionCommand = (): void => {
+    this.restartCurrentMission();
+  };
 
   constructor() {
     super({ key: 'GameScene' });
@@ -53,12 +63,55 @@ export class GameScene extends Phaser.Scene {
     });
     this.player.setDepth(10);
 
-    this.createHUD(worldWidth);
     this.createNotificationBanner(worldWidth, worldHeight);
+
+    // Register React UI command listeners
+    EventBus.onCommand('cmd:toggle-pause', this.handleTogglePauseCommand);
+    EventBus.onCommand('cmd:set-pause', this.handleSetPauseCommand);
+    EventBus.onCommand('cmd:restart-mission', this.handleRestartMissionCommand);
+
+    // Clean up event listeners on scene shutdown
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.teardownCommandListeners();
+    });
+
+    // Notify React that the engine and initial session stats are ready
+    EventBus.emitEvent('game:ready');
+    this.deliveryManager.emitStatsUpdate();
+
+    // Start first delivery
+    this.startNewDeliveryRun();
+  }
+
+  private teardownCommandListeners(): void {
+    EventBus.offCommand('cmd:toggle-pause', this.handleTogglePauseCommand);
+    EventBus.offCommand('cmd:set-pause', this.handleSetPauseCommand);
+    EventBus.offCommand('cmd:restart-mission', this.handleRestartMissionCommand);
+  }
+
+  public togglePause(): void {
+    this.setPaused(!this.isPaused);
+  }
+
+  public setPaused(paused: boolean): void {
+    this.isPaused = paused;
+    if (this.isPaused) {
+      this.physics.pause();
+    } else {
+      this.physics.resume();
+    }
+
+    // Emit event to React to keep UI pause button & overlay in sync
+    EventBus.emitEvent('game:paused-changed', { isPaused: this.isPaused });
+  }
+
+  public restartCurrentMission(): void {
     this.startNewDeliveryRun();
   }
 
   override update(_time: number, delta: number): void {
+    if (this.isPaused) return;
+
     const deltaSeconds = delta / 1000;
 
     const input = this.inputManager.getMovementInput();
@@ -78,8 +131,6 @@ export class GameScene extends Phaser.Scene {
       this.checkInteractions(mission);
       this.updateGuideArrow(mission);
     }
-
-    this.updateHUDDisplay(mission);
 
     if (
       mission &&
@@ -259,99 +310,6 @@ export class GameScene extends Phaser.Scene {
       this.activeDestinationPad = null;
     }
     this.guideArrow.clear();
-  }
-
-  private createHUD(worldWidth: number): void {
-    this.missionPanel = this.add.container(16, 16);
-    this.missionPanel.setDepth(20);
-
-    const hudBg = this.add.graphics();
-    hudBg.fillStyle(0x08090d, 0.85);
-    hudBg.lineStyle(1, 0x262c3d, 0.9);
-    hudBg.fillRoundedRect(0, 0, 480, 78, 6);
-    hudBg.strokeRoundedRect(0, 0, 480, 78, 6);
-    this.missionPanel.add(hudBg);
-
-    this.missionStatusText = this.add.text(12, 10, 'STATUS: INITIALIZING', {
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      color: '#00f0ff',
-      fontStyle: 'bold',
-    });
-    this.missionPanel.add(this.missionStatusText);
-
-    this.missionDetailsText = this.add.text(12, 30, 'Searching for dispatch assignment...', {
-      fontFamily: 'monospace',
-      fontSize: '11px',
-      color: '#e2e8f0',
-    });
-    this.missionPanel.add(this.missionDetailsText);
-
-    this.timerText = this.add.text(12, 52, 'TIMER: --:--', {
-      fontFamily: 'monospace',
-      fontSize: '13px',
-      color: '#39ff14',
-      fontStyle: 'bold',
-    });
-    this.missionPanel.add(this.timerText);
-
-    const scorePanel = this.add.container(worldWidth - 280, 16);
-    scorePanel.setDepth(20);
-
-    const scoreBg = this.add.graphics();
-    scoreBg.fillStyle(0x08090d, 0.85);
-    scoreBg.lineStyle(1, 0x262c3d, 0.9);
-    scoreBg.fillRoundedRect(0, 0, 264, 78, 6);
-    scoreBg.strokeRoundedRect(0, 0, 264, 78, 6);
-    scorePanel.add(scoreBg);
-
-    this.scoreText = this.add.text(12, 12, 'SESSION STATS\nCREDITS: ¢ 0\nRUNS: 0 / 0', {
-      fontFamily: 'monospace',
-      fontSize: '12px',
-      color: '#ffaa00',
-      lineSpacing: 4,
-    });
-    scorePanel.add(this.scoreText);
-  }
-
-  private updateHUDDisplay(mission: ActiveMission | null): void {
-    if (!mission) {
-      return;
-    }
-
-    if (mission.status === 'pickup_available') {
-      this.missionStatusText.setText('STATUS: PICKUP PENDING [AWAITING RETRIEVAL]');
-      this.missionStatusText.setColor('#ffaa00');
-      this.missionDetailsText.setText(
-        `Cargo: ${mission.packageDef.name} (${mission.packageDef.weightCategory})`
-      );
-      this.timerText.setText(`TIME TO TRANSIT: ${mission.timeLimitSeconds}s (Starts on pickup)`);
-      this.timerText.setColor('#94a3b8');
-    } else if (mission.status === 'in_transit') {
-      this.missionStatusText.setText('STATUS: IN TRANSIT [PRIORITY DELIVERY]');
-      this.missionStatusText.setColor('#00f0ff');
-      this.missionDetailsText.setText(`Target: ${mission.dropoffLocation.name}`);
-
-      const remaining = Math.max(0, mission.remainingTimeSeconds).toFixed(1);
-      const isUrgent = mission.remainingTimeSeconds <= 5;
-      this.timerText.setText(`DELIVERY EXPIRATION: ${remaining}s`);
-      this.timerText.setColor(isUrgent ? '#ff007f' : '#39ff14');
-    } else if (mission.status === 'success') {
-      this.missionStatusText.setText('STATUS: MISSION SUCCESSFUL');
-      this.missionStatusText.setColor('#39ff14');
-      this.timerText.setText('DELIVERY CONFIRMED');
-    } else if (mission.status === 'failed') {
-      this.missionStatusText.setText('STATUS: CONTRACT EXPIRED');
-      this.missionStatusText.setColor('#ff007f');
-      this.timerText.setText('DELIVERY WINDOW MISSED');
-    }
-
-    const stats = this.deliveryManager.getSessionStats();
-    this.scoreText.setText(
-      `SESSION STATS
-CREDITS: ¢ ${stats.totalCreditsEarned}
-SUCCESS: ${stats.completedCount} | FAILED: ${stats.failedCount}`
-    );
   }
 
   private createNotificationBanner(worldWidth: number, worldHeight: number): void {
