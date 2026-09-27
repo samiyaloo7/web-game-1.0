@@ -1,26 +1,42 @@
 @import "tailwindcss";
 
+@theme {
+  --color-neon-cyan: #00f0ff;
+  --color-neon-pink: #ff007f;
+  --color-neon-amber: #ffaa00;
+  --color-neon-green: #39ff14;
+  --color-cyber-black: #08090d;
+  --color-cyber-dark: #0f1118;
+  --color-cyber-surface: #171b26;
+  --color-cyber-border: #262c3d;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #08090d;
+  --foreground: #f1f5f9;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  overflow-x: hidden;
 }
+
+/* Custom Cyberpunk Utilities */
+.neon-glow-cyan {
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.45);
+}
+
+.neon-glow-pink {
+  box-shadow: 0 0 15px rgba(255, 0, 127, 0.45);
+}
+
+.neon-text-cyan {
+  text-shadow: 0 0 8px rgba(0, 240, 255, 0.7);
+}
+
+.neon-text-pink {
+  text-shadow: 0 0 8px rgba(255, 0, 127, 0.7);
+}
+

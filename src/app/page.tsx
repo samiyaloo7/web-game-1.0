@@ -1,69 +1,76 @@
-import Image from "next/image";
+import { Button } from "@/components/ui/Button";
+import { Package, ShieldAlert, Cpu, ChevronRight, Sparkles } from "lucide-react";
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="flex-1 flex flex-col justify-center items-center px-4 py-16 sm:py-24 relative overflow-hidden">
+      {/* Background neon grid glow */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-neon-cyan/10 blur-[130px] pointer-events-none rounded-full" />
+      <div className="absolute bottom-10 right-10 w-[300px] h-[300px] bg-neon-pink/10 blur-[100px] pointer-events-none rounded-full" />
+
+      {/* Hero Badge */}
+      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-neon-cyan/30 bg-cyber-surface/70 text-neon-cyan text-xs tracking-wider uppercase mb-8 backdrop-blur-sm">
+        <Sparkles className="w-3.5 h-3.5" />
+        <span>System Status: Online // Sector 7 Active</span>
+      </div>
+
+      {/* Main Title */}
+      <h1 className="text-4xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-center max-w-4xl text-white">
+        DELIVER FAST. <br />
+        <span className="text-transparent bg-clip-text bg-gradient-to-r from-neon-cyan via-white to-neon-pink neon-text-cyan">
+          SURVIVE THE NIGHT.
+        </span>
+      </h1>
+
+      {/* Subtitle */}
+      <p className="mt-6 text-zinc-400 text-center max-w-xl text-base sm:text-lg leading-relaxed">
+        Pilot high-velocity hoverbikes through rain-soaked neon alleys. Outmaneuver syndicate drones, deliver illicit cargo, and customize your cybernetic ride.
+      </p>
+
+      {/* CTA Buttons */}
+      <div className="mt-10 flex flex-col sm:flex-row items-center gap-4 w-full max-w-xs sm:max-w-none justify-center">
+        <Button href="/game" size="lg" className="w-full sm:w-auto flex items-center gap-2 group">
+          <span>Launch Mission</span>
+          <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+        </Button>
+        <Button href="/leaderboard" variant="outline" size="lg" className="w-full sm:w-auto">
+          View High Scores
+        </Button>
+      </div>
+
+      {/* Features preview */}
+      <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
+        <div className="p-6 rounded-lg border border-cyber-border bg-cyber-surface/50 backdrop-blur-sm hover:border-neon-cyan/50 transition-colors">
+          <div className="p-3 w-fit rounded bg-neon-cyan/10 border border-neon-cyan/20 text-neon-cyan mb-4">
+            <Package className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold text-white mb-2">High-Stakes Dispatch</h2>
+          <p className="text-sm text-zinc-400">
+            Pick up urgent packages with tight deadlines and fragile cargo modifiers across sprawling city sectors.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="p-6 rounded-lg border border-cyber-border bg-cyber-surface/50 backdrop-blur-sm hover:border-neon-pink/50 transition-colors">
+          <div className="p-3 w-fit rounded bg-neon-pink/10 border border-neon-pink/20 text-neon-pink mb-4">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold text-white mb-2">Dynamic Threats</h2>
+          <p className="text-sm text-zinc-400">
+            Dodge autonomous police drones, laser barricades, and heavy congestion in a high-speed arcade simulation.
+          </p>
         </div>
-      </main>
+
+        <div className="p-6 rounded-lg border border-cyber-border bg-cyber-surface/50 backdrop-blur-sm hover:border-neon-amber/50 transition-colors">
+          <div className="p-3 w-fit rounded bg-neon-amber/10 border border-neon-amber/20 text-neon-amber mb-4">
+            <Cpu className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold text-white mb-2">Garage & Mod Shop</h2>
+          <p className="text-sm text-zinc-400">
+            Spend earned street credits on ion thrusters, electromagnetic shielding, and oversized cargo containers.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
+
