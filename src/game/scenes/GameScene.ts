@@ -1,26 +1,22 @@
 import * as Phaser from 'phaser';
+import { Player } from '../entities/Player';
+import { InputManager } from '../systems/InputManager';
 
 /**
- * GameScene is the primary Phaser Scene where the real-time gameplay loop runs.
- * It manages the world canvas, physics world, tile/grid visuals, and player updates.
+ * GameScene is the primary Phaser Scene where the real-time simulation loop runs.
+ * It manages the world canvas, physics bounds, background grid, and player updates.
  */
 export class GameScene extends Phaser.Scene {
-  private player!: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
-  private wasd!: {
-    W: Phaser.Input.Keyboard.Key;
-    A: Phaser.Input.Keyboard.Key;
-    S: Phaser.Input.Keyboard.Key;
-    D: Phaser.Input.Keyboard.Key;
-  };
-  private readonly playerSpeed: number = 240;
+  private player!: Player;
+  private inputManager!: InputManager;
+  private telemetryText!: Phaser.GameObjects.Text;
+  private stateText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'GameScene' });
   }
 
   preload(): void {
-    // We generate programmatic textures here so the game does not depend on external image files during early dev.
     this.createProgrammaticTextures();
   }
 
@@ -34,85 +30,67 @@ export class GameScene extends Phaser.Scene {
     // 2. Set physics bounds
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
 
-    // 3. Create the player hoverbike sprite using the generated texture
-    this.player = this.physics.add.sprite(worldWidth / 2, worldHeight / 2, 'player-courier');
-    this.player.setCollideWorldBounds(true);
-    this.player.setDamping(true);
-    this.player.setDrag(0.85); // Adds a nice drift / momentum deceleration feel
-    this.player.setMaxVelocity(this.playerSpeed);
+    // 3. Instantiate decoupled input system
+    this.inputManager = new InputManager(this);
 
-    // 4. Setup keyboard controls: Arrow keys + WASD
-    if (this.input.keyboard) {
-      this.cursors = this.input.keyboard.createCursorKeys();
-      this.wasd = {
-        W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-        A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-        S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-        D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
-      };
-    }
+    // 4. Instantiate Player entity (encapsulating physics, animation, and state)
+    this.player = new Player(this, worldWidth / 2, worldHeight / 2, {
+      speed: 300,
+      acceleration: 1400,
+      drag: 0.88,
+    });
 
-    // 5. Add a simple HUD label directly inside the canvas to show coordinates
-    this.add.text(16, 16, 'SECTOR 04 // SIMULATION ONLINE', {
+    // 5. In-canvas Telemetry Overlay
+    this.add.text(16, 16, 'NEON COURIER // SECTOR 04 ACTIVE', {
       fontFamily: 'monospace',
-      fontSize: '14px',
+      fontSize: '13px',
       color: '#00f0ff',
     });
 
-    this.add.text(16, 36, 'CONTROLS: WASD / ARROWS TO NAVIGATE', {
+    this.stateText = this.add.text(16, 36, 'STATUS: IDLE', {
+      fontFamily: 'monospace',
+      fontSize: '12px',
+      color: '#ffaa00',
+    });
+
+    this.telemetryText = this.add.text(16, 54, 'POS: [0, 0] | SPEED: 0 KM/H', {
       fontFamily: 'monospace',
       fontSize: '12px',
       color: '#94a3b8',
     });
   }
 
-  override update(): void {
-    if (!this.player || !this.cursors || !this.wasd) return;
+  /**
+   * The Game Loop's update step.
+   * @param time Total game elapsed time in ms
+   * @param delta Milliseconds elapsed since the previous tick (delta time)
+   */
+  override update(_time: number, delta: number): void {
+    if (!this.player || !this.inputManager) return;
 
-    let moveX = 0;
-    let moveY = 0;
+    // 1. Read input intent from InputManager
+    const input = this.inputManager.getMovementInput();
 
-    // Handle horizontal movement
-    if (this.cursors.left.isDown || this.wasd.A.isDown) {
-      moveX -= 1;
-    }
-    if (this.cursors.right.isDown || this.wasd.D.isDown) {
-      moveX += 1;
-    }
+    // 2. Advance player simulation using delta time
+    this.player.updatePlayer(delta, input);
 
-    // Handle vertical movement
-    if (this.cursors.up.isDown || this.wasd.W.isDown) {
-      moveY -= 1;
-    }
-    if (this.cursors.down.isDown || this.wasd.S.isDown) {
-      moveY += 1;
-    }
+    // 3. Inspect player state
+    const playerSnapshot = this.player.getState();
 
-    // Normalize diagonal velocity so diagonal moving isn't sqrt(2) faster
-    if (moveX !== 0 && moveY !== 0) {
-      moveX *= 0.7071;
-      moveY *= 0.7071;
-    }
+    // 4. Update in-canvas telemetry text
+    const statusColor = playerSnapshot.state === 'moving' ? '#39ff14' : '#ffaa00';
+    this.stateText.setText(`STATUS: ${playerSnapshot.state.toUpperCase()}`);
+    this.stateText.setColor(statusColor);
 
-    // Apply acceleration / velocity
-    const targetVelocityX = moveX * this.playerSpeed;
-    const targetVelocityY = moveY * this.playerSpeed;
-
-    this.player.setVelocity(targetVelocityX, targetVelocityY);
-
-    // Rotate player sprite toward direction of motion
-    if (moveX !== 0 || moveY !== 0) {
-      const angle = Math.atan2(moveY, moveX);
-      this.player.setRotation(angle + Math.PI / 2); // Oriented upward by default
-    }
+    this.telemetryText.setText(
+      `POS: [${Math.round(playerSnapshot.x)}, ${Math.round(playerSnapshot.y)}] | SPEED: ${playerSnapshot.speed} KM/H`
+    );
   }
 
   /**
    * Generates lightweight, procedural textures into Phaser's TextureManager.
-   * This provides crisp visuals without needing external asset downloads.
    */
   private createProgrammaticTextures(): void {
-    // Check if texture already exists (e.g. across scene restarts)
     if (!this.textures.exists('player-courier')) {
       const graphics = this.make.graphics({ x: 0, y: 0 });
 
@@ -126,14 +104,18 @@ export class GameScene extends Phaser.Scene {
       graphics.closePath();
       graphics.fillPath();
 
+      // Wing outline for definition
+      graphics.lineStyle(1.5, 0xffffff, 0.9);
+      graphics.strokePath();
+
       // Cockpit canopy
       graphics.fillStyle(0xff007f, 1); // Neon pink canopy
-      graphics.fillCircle(16, 18, 5);
+      graphics.fillCircle(16, 18, 4.5);
 
-      // Dual engine thrusters
-      graphics.fillStyle(0xffaa00, 1); // Amber engine exhaust
-      graphics.fillRect(6, 32, 4, 6);
-      graphics.fillRect(22, 32, 4, 6);
+      // Dual engine thruster housings
+      graphics.fillStyle(0x171b26, 1);
+      graphics.fillRect(5, 30, 6, 6);
+      graphics.fillRect(21, 30, 6, 6);
 
       graphics.generateTexture('player-courier', 32, 40);
       graphics.destroy();
@@ -151,8 +133,8 @@ export class GameScene extends Phaser.Scene {
     grid.fillStyle(0x0a0c14, 1);
     grid.fillRect(0, 0, width, height);
 
-    // Neon grid lines
-    grid.lineStyle(1, 0x1e2638, 0.7);
+    // Grid lines
+    grid.lineStyle(1, 0x171e2e, 0.8);
 
     for (let x = 0; x <= width; x += gridSize) {
       grid.moveTo(x, 0);
@@ -166,8 +148,13 @@ export class GameScene extends Phaser.Scene {
 
     grid.strokePath();
 
-    // Road borders (outer boundary glow)
-    grid.lineStyle(3, 0x00f0ff, 0.5);
+    // Outer neon boundary border
+    grid.lineStyle(3, 0x00f0ff, 0.6);
     grid.strokeRect(4, 4, width - 8, height - 8);
+
+    // Subtle center marker
+    grid.lineStyle(1, 0xff007f, 0.4);
+    grid.strokeCircle(width / 2, height / 2, 60);
   }
 }
+
