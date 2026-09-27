@@ -73,6 +73,9 @@ export class GameScene extends Phaser.Scene {
     // Clean up event listeners on scene shutdown
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.teardownCommandListeners();
+      // Notify React that the simulation engine has torn down so the HUD
+      // can reset its engine-ready flag instead of showing stale telemetry.
+      EventBus.emitEvent('game:destroyed');
     });
 
     // Notify React that the engine and initial session stats are ready
