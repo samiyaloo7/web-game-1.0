@@ -1,5 +1,6 @@
-import { Button } from "@/components/ui/Button";
 import { Gamepad2, ArrowLeft, ShieldCheck, Zap } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { GameContainer } from "@/components/game/GameContainer";
 
 export const metadata = {
   title: "Dispatch Console // Neon Courier",
@@ -9,12 +10,13 @@ export const metadata = {
 export default function GamePage() {
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8">
-      <div className="w-full max-w-4xl border border-cyber-border rounded-xl bg-cyber-dark/80 p-6 sm:p-10 backdrop-blur-md relative overflow-hidden">
+      <div className="w-full max-w-5xl border border-cyber-border rounded-xl bg-cyber-dark/80 p-6 sm:p-8 backdrop-blur-md relative overflow-hidden">
         {/* Accent corner lines */}
-        <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-neon-cyan" />
-        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-neon-pink" />
+        <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-neon-cyan pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-neon-pink pointer-events-none" />
 
-        <div className="flex items-center justify-between pb-6 border-b border-cyber-border mb-8">
+        {/* Console Header */}
+        <div className="flex items-center justify-between pb-6 border-b border-cyber-border mb-6">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded bg-neon-cyan/10 border border-neon-cyan/30 text-neon-cyan">
               <Gamepad2 className="w-6 h-6" />
@@ -23,40 +25,27 @@ export default function GamePage() {
               <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide">
                 DISPATCH INTERFACE
               </h1>
-              <p className="text-xs text-zinc-400">SECTOR 04 - METRO RUNNER TERMINAL</p>
+              <p className="text-xs text-zinc-400 font-mono">SECTOR 04 - METRO RUNNER TERMINAL</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-cyber-surface border border-emerald-500/30 text-emerald-400 text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>STANDBY</span>
+            <span>SIMULATION LIVE</span>
           </div>
         </div>
 
-        {/* Game Canvas Placeholder Frame */}
-        <div className="w-full h-80 sm:h-96 rounded-lg border-2 border-dashed border-cyber-border bg-cyber-black/70 flex flex-col items-center justify-center text-center p-6 relative group">
-          <div className="p-4 rounded-full bg-neon-cyan/5 border border-neon-cyan/20 text-neon-cyan mb-4 group-hover:scale-110 transition-transform">
-            <Zap className="w-8 h-8" />
-          </div>
-          <h2 className="text-lg font-bold text-white mb-2">PHASER SIMULATION CANVAS</h2>
-          <p className="text-sm text-zinc-400 max-w-md">
-            The Phaser 3 2D rendering viewport will mount here in Step 2. High-speed physics, arcade collisions, and neon particles will render in this viewport.
-          </p>
-          <div className="mt-6 flex items-center gap-4 text-xs font-mono text-zinc-500">
-            <span>RES: 1280x720</span>
-            <span>•</span>
-            <span>FPS TARGET: 60</span>
-            <span>•</span>
-            <span>RENDERER: WEBGL</span>
-          </div>
+        {/* Live Phaser 3 Game Canvas Viewport */}
+        <div className="flex justify-center w-full my-2">
+          <GameContainer />
         </div>
 
         {/* Pre-flight Check Info */}
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-4 rounded bg-cyber-surface/60 border border-cyber-border flex items-center gap-3">
             <ShieldCheck className="w-5 h-5 text-neon-cyan" />
             <div>
-              <div className="text-xs text-zinc-400">VEHICLE HULL</div>
+              <div className="text-xs text-zinc-400 font-mono">VEHICLE HULL</div>
               <div className="text-sm font-semibold text-white">Stock Courier (100 HP)</div>
             </div>
           </div>
@@ -64,31 +53,33 @@ export default function GamePage() {
           <div className="p-4 rounded bg-cyber-surface/60 border border-cyber-border flex items-center gap-3">
             <Zap className="w-5 h-5 text-neon-amber" />
             <div>
-              <div className="text-xs text-zinc-400">ENGINE CLASS</div>
-              <div className="text-sm font-semibold text-white">Turbine Mk1 (Standard)</div>
+              <div className="text-xs text-zinc-400 font-mono">THRUSTER DRAG</div>
+              <div className="text-sm font-semibold text-white">Momentum Damping (0.85)</div>
             </div>
           </div>
 
           <div className="p-4 rounded bg-cyber-surface/60 border border-cyber-border flex items-center gap-3">
             <Gamepad2 className="w-5 h-5 text-neon-pink" />
             <div>
-              <div className="text-xs text-zinc-400">CONTROLS</div>
+              <div className="text-xs text-zinc-400 font-mono">CONTROLS</div>
               <div className="text-sm font-semibold text-white">WASD / Arrow Keys</div>
             </div>
           </div>
         </div>
 
-        <div className="mt-8 flex justify-between items-center pt-6 border-t border-cyber-border">
+        {/* Navigation Actions */}
+        <div className="mt-6 flex justify-between items-center pt-6 border-t border-cyber-border">
           <Button href="/" variant="outline" size="sm" className="flex items-center gap-2">
             <ArrowLeft className="w-4 h-4" />
             <span>Return to Menu</span>
           </Button>
 
-          <Button variant="primary" size="md">
-            Initiate Boot Sequence
+          <Button href="/profile" variant="ghost" size="sm">
+            View Courier Dossier
           </Button>
         </div>
       </div>
     </div>
   );
 }
+
