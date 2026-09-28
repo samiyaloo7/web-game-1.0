@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { ProgressionSnapshot } from './types/progression';
+import type { ProgressionSnapshot, ProgressionState } from './types/progression';
 
 
 /**
@@ -77,6 +77,29 @@ export interface GameToUiEvents {
     reason: 'destroyed' | null;
     survivedSeconds: number;
   };
+  /**
+   * Emitted once per finished delivery attempt.
+   *
+   * Carries *references*, not the payout: the package id tells the server which
+   * catalog row to price, and `timeRatio` says how much of the timer was left.
+   * The credits are deliberately absent — the server recomputes them from its own
+   * `package_defs` table and the courier's stored upgrades, so the browser can
+   * describe the run but can never assert what it earned.
+   *
+   * The React layer turns this into `POST /api/scores`; Phaser itself never
+   * imports Supabase or `fetch`.
+   */
+  'delivery:recorded': {
+    status: 'completed' | 'failed';
+    /** Key into the server-owned catalog. */
+    packageId: string;
+    /** Fraction of the timer remaining, 0..1. */
+    timeRatio: number;
+    /** Wall-clock seconds spent on the run. */
+    durationSeconds: number;
+    /** What the client believes it earned. Audit only — the server ignores it. */
+    claimedCredits: number;
+  };
   /** Engine lifecycle notifications */
   'game:ready': void;
   'game:destroyed': void;
@@ -94,6 +117,16 @@ export interface UiToGameCommands {
   'cmd:restart-run': void;
   /** Generate a fresh city. Omit `seed` to roll a random one. */
   'cmd:regenerate-city': { seed?: number | string };
+  /**
+   * Hydrate the career profile from the database.
+   *
+   * Sent by `useProgressionSync` once the persisted row has loaded. The scene
+   * treats the payload as *untrusted input*: `PlayerProgression`'s constructor
+   * sanitises money, XP and upgrade levels, and rank is re-derived locally rather
+   * than trusted from the wire. Loading a career is deliberately not a full
+   * reset — the run in progress keeps its hull, speed and current mission.
+   */
+  'cmd:load-progression': { state: ProgressionState };
 }
 
 export type AllGameEvents = GameToUiEvents & UiToGameCommands;

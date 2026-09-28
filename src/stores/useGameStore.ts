@@ -86,6 +86,18 @@ interface GameStoreState {
   isPaused: boolean;
   // Engine ready flag
   isEngineReady: boolean;
+  /**
+   * Persistence health, surfaced by the HUD so a courier can tell "saved" from
+   * "silently not saving". UI state only — the authoritative career always lives
+   * in the game's `PlayerProgression`.
+   */
+  syncStatus: 'idle' | 'saving' | 'saved' | 'error' | 'offline';
+  /**
+   * Set by the server's own `is_new_best` flag when a delivery beats the
+   * courier's previous record. Server-decided, so a tampered client cannot
+   * trigger the celebration.
+   */
+  isNewPersonalBest: boolean;
 
   // Actions
   setMission: (mission: GameToUiEvents['mission:updated']) => void;
@@ -98,6 +110,8 @@ interface GameStoreState {
   setRunState: (run: GameToUiEvents['game:run-state-changed']) => void;
   setIsPaused: (isPaused: boolean) => void;
   setIsEngineReady: (isReady: boolean) => void;
+  setSyncStatus: (status: GameStoreState['syncStatus']) => void;
+  setIsNewPersonalBest: (isNewBest: boolean) => void;
   resetSession: () => void;
 }
 
@@ -179,6 +193,8 @@ export const useGameStore = create<GameStoreState>((set) => ({
   run: initialRun,
   isPaused: false,
   isEngineReady: false,
+  syncStatus: 'idle',
+  isNewPersonalBest: false,
 
   setMission: (mission) =>
     set({
@@ -218,6 +234,10 @@ export const useGameStore = create<GameStoreState>((set) => ({
   setIsPaused: (isPaused) => set({ isPaused }),
 
   setIsEngineReady: (isReady) => set({ isEngineReady: isReady }),
+
+  setSyncStatus: (syncStatus) => set({ syncStatus }),
+
+  setIsNewPersonalBest: (isNewPersonalBest) => set({ isNewPersonalBest }),
 
   /**
    * Clears the *session* view only. `progression` is deliberately untouched: the career

@@ -18,6 +18,8 @@ import { planDroneSpawns } from '../systems/DroneSpawner';
 import { SeededRandom } from '../systems/SeededRandom';
 import { PlayerProgression } from '../systems/PlayerProgression';
 import { DEFAULT_BASE_STATS } from '../types/progression';
+import { computeTimeRatio } from '../../lib/scoring/delivery';
+import type { ProgressionState } from '../types/progression';
 
 /** Options accepted by the scene instance built in `config.ts`. */
 export interface GameSceneOptions {
@@ -86,6 +88,21 @@ export class GameScene extends Phaser.Scene {
     this.restartRun();
   };
 
+  /**
+   * Hydrates the career from a persisted row.
+   *
+   * The payload arrives over the untrusted network, so it goes through
+   * `PlayerProgression.hydrate` (which sanitises money, XP and upgrade levels)
+   * instead of being written straight into the state. The derived stat block is
+   * re-applied to the live run, so a returning courier's armour, speed, payout
+   * and timer bonuses take effect immediately — but the current hull, city and
+   * mission are untouched, because loading a career is not a new run.
+   */
+  private handleLoadProgressionCommand = (data: { state: ProgressionState }): void => {
+    this.progression.hydrate(data.state);
+    this.applyProgressionLoadout();
+  };
+
   constructor(options: GameSceneOptions = {}) {
     super({ key: 'GameScene' });
     this.initialSeed = options.seed;
@@ -130,6 +147,7 @@ export class GameScene extends Phaser.Scene {
     EventBus.onCommand('cmd:restart-mission', this.handleRestartMissionCommand);
     EventBus.onCommand('cmd:regenerate-city', this.handleRegenerateCityCommand);
     EventBus.onCommand('cmd:restart-run', this.handleRestartRunCommand);
+    EventBus.onCommand('cmd:load-progression', this.handleLoadProgressionCommand);
 
     // Clean up event listeners on scene shutdown
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -308,6 +326,7 @@ export class GameScene extends Phaser.Scene {
     EventBus.offCommand('cmd:restart-mission', this.handleRestartMissionCommand);
     EventBus.offCommand('cmd:regenerate-city', this.handleRegenerateCityCommand);
     EventBus.offCommand('cmd:restart-run', this.handleRestartRunCommand);
+    EventBus.offCommand('cmd:load-progression', this.handleLoadProgressionCommand);
   }
 
   public togglePause(): void {
@@ -615,6 +634,24 @@ export class GameScene extends Phaser.Scene {
     );
 
     this.nextMissionCooldownTimer = 3.5;
+
+    // Publish the run for the leaderboard. Note what is sent: a package id and a
+    // time ratio, NOT the payout. The server prices the delivery from its own
+    // catalog, so the browser describes the run but cannot assert what it earned.
+    // React owns the network call (useScoreReporting → POST /api/scores), so
+    // Phaser never imports Supabase or `fetch`.
+    if (mission) {
+      EventBus.emitEvent('delivery:recorded', {
+        status: 'completed',
+        packageId: mission.packageDef.id,
+        timeRatio: computeTimeRatio(
+          mission.remainingTimeSeconds,
+          mission.timeLimitSeconds
+        ),
+        durationSeconds: mission.timeLimitSeconds - mission.remainingTimeSeconds,
+        claimedCredits: credits,
+      });
+    }
   }
 
   private onMissionStateChanged(mission: ActiveMission): void {
@@ -629,6 +666,17 @@ export class GameScene extends Phaser.Scene {
       );
 
       this.nextMissionCooldownTimer = 3.5;
+
+      // A failed delivery still belongs in the record. It awards nothing (the
+      // `scores_paid_when_completed` CHECK enforces credits = xp = 0), but the
+      // board's delivery count and the dossier's success rate both need it.
+      EventBus.emitEvent('delivery:recorded', {
+        status: 'failed',
+        packageId: mission.packageDef.id,
+        timeRatio: 0,
+        durationSeconds: mission.timeLimitSeconds,
+        claimedCredits: 0,
+      });
     }
   }
 

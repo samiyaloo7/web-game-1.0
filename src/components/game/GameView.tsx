@@ -9,6 +9,8 @@ import { GameHudVitals } from './GameHudVitals';
 import { GameOverOverlay } from './GameOverOverlay';
 import { PauseOverlay } from './PauseOverlay';
 import { useGameBridge } from '@/hooks/useGameBridge';
+import { useProgressionSync } from '@/hooks/useProgressionSync';
+import { useScoreReporting } from '@/hooks/useScoreReporting';
 
 /**
  * Reads an optional `?seed=` query param so a generated district can be shared or
@@ -33,6 +35,13 @@ export function GameView() {
 
   // Mount EventBus listener bridge
   useGameBridge();
+
+  // Hydrate the career from Supabase on mount and persist changes back.
+  // No-ops entirely for guests, so an unconfigured project still plays.
+  useProgressionSync();
+
+  // Report finished deliveries to the leaderboard. Also a no-op for guests.
+  useScoreReporting();
 
   useEffect(() => {
     let isCancelled = false;

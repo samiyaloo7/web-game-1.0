@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Zap, Gamepad2, Trophy, User } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Zap, Gamepad2, Trophy, User, LogIn, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 interface NavItem {
   label: string;
@@ -19,6 +20,14 @@ const navItems: NavItem[] = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, isLoading, isConfigured, logout } = useAuth();
+
+  async function handleLogout() {
+    await logout();
+    router.push("/");
+    router.refresh();
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-cyber-border/80 bg-cyber-black/80 backdrop-blur-md">
@@ -56,6 +65,44 @@ export function Navbar() {
             );
           })}
         </nav>
+        {/* Auth controls. While the session check is in flight the slot holds its
+            width instead of flashing a "Sign in" link at an already-signed-in user. */}
+        <div className="flex items-center gap-2 sm:gap-3 ml-auto sm:ml-4 pl-3 sm:pl-4 border-l border-cyber-border/70">
+          {isLoading ? (
+            <div className="w-20 h-8" aria-hidden />
+          ) : user ? (
+            <>
+              <Link
+                href="/profile"
+                className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono text-neon-cyan border border-neon-cyan/30 bg-neon-cyan/10 hover:bg-neon-cyan/20 transition-colors"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span className="max-w-[10rem] truncate">{user.username}</span>
+              </Link>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-mono text-zinc-400 hover:text-neon-pink border border-transparent hover:border-neon-pink/30 transition-colors"
+                title="Disconnect from the syndicate network"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Jack Out</span>
+              </button>
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono uppercase tracking-wider transition-colors",
+                isConfigured
+                  ? "text-neon-cyan border border-neon-cyan/40 hover:bg-neon-cyan/10"
+                  : "text-zinc-500 border border-cyber-border hover:text-zinc-300"
+              )}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isConfigured ? "Jack In" : "Offline"}</span>
+            </Link>
+          )}
+        </div>
       </div>
     </header>
   );

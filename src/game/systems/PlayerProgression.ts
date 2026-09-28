@@ -211,6 +211,27 @@ export class PlayerProgression {
   }
 
   /**
+   * Replaces the career with a persisted profile (e.g. loaded from Supabase).
+   *
+   * Sanitises the payload exactly as the constructor does, because the input
+   * arrives over the network and is therefore untrusted: non-finite or negative
+   * money/XP fall back to the construction baseline, and unknown upgrade ids or
+   * out-of-range levels are dropped/clamped against the catalogue. Rank is
+   * re-derived from the sanitised XP rather than read from the row — the same
+   * rule the database enforces with its generated column.
+   *
+   * Notifies, so the HUD republishes the loaded wallet/rank immediately.
+   */
+  public hydrate(state: Partial<ProgressionState>): void {
+    this.state = {
+      money: sanitizeMoney(state.money, this.baseline.money),
+      xp: sanitizeTotalXp(state.xp),
+      upgrades: sanitizeUpgrades(state.upgrades, this.catalog),
+    };
+    this.notify();
+  }
+
+  /**
    * Restores the profile to the state it was constructed with (factory defaults, or the
    * hydration payload). Notifies, because the UI must drop any wallet/rank it was showing.
    */
