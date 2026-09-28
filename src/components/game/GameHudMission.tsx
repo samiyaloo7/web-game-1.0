@@ -17,6 +17,10 @@ export function GameHudMission() {
   const destinationZone = useGameStore((s) => s.mission.destinationZone);
   const remainingTimeSeconds = useGameStore((s) => s.mission.remainingTimeSeconds);
   const timeLimitSeconds = useGameStore((s) => s.mission.timeLimitSeconds);
+  const citySeedLabel = useGameStore((s) => s.city.seedLabel);
+  const cityCols = useGameStore((s) => s.city.cols);
+  const cityRows = useGameStore((s) => s.city.rows);
+  const cityLocationCount = useGameStore((s) => s.city.locationCount);
 
   // Status visual configurations
   const statusConfig = {
@@ -132,6 +136,16 @@ export function GameHudMission() {
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Generated district telemetry: seed + grid size */}
+      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-cyber-border/70 text-[10px] text-zinc-500">
+        <span title="Seed of this district. Append ?seed= to the URL to replay it.">
+          SECTOR SEED: <span className="text-neon-cyan font-semibold">{citySeedLabel}</span>
+        </span>
+        <span>
+          GRID {cityCols}x{cityRows} &bull; {cityLocationCount} NODES
+        </span>
       </div>
     </div>
   );

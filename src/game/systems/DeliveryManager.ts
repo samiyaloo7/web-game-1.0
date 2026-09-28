@@ -1,23 +1,35 @@
 import {
   ActiveMission,
   PackageDefinition,
-  DeliveryLocation,
   SessionDeliveryStats,
 } from '../types/delivery';
-import { PACKAGE_CATALOG, SECTOR_LOCATIONS } from '../data/deliveryData';
+import type { CityLocation } from '../types/city';
+import { PACKAGE_CATALOG } from '../data/deliveryData';
 import { EventBus } from '../EventBus';
+import { SeededRandom } from './SeededRandom';
+import { pickMissionLocations } from './CityGenerator';
+import { applyRewardMultiplier } from './ProgressionMath';
+
 
 export type DeliveryEventCallback = (mission: ActiveMission) => void;
 
 /**
  * DeliveryManager coordinates the complete lifecycle of deliveries:
- * - Generating new procedural/catalog missions
+ * - Generating new missions from the generated city's locations
  * - Distance calculations & generous dynamic time limit formulas
  * - State machine updates (pickup -> in_transit -> success | failed)
  * - Bonus & reward calculations
+ *
+ * Randomness is injected as a `SeededRandom` rather than `Math.random()`, so a run
+ * is reproducible: same city seed -> same sequence of dispatches.
  */
 export class DeliveryManager {
   private currentMission: ActiveMission | null = null;
+  private missionCounter: number = 0;
+  private readonly minMissionDistance: number;
+  /** Career tuning from the progression system: 1× payout and no bonus time until applied. */
+  private rewardMultiplier: number = 1;
+  private timerBonusSeconds: number = 0;
   private sessionStats: SessionDeliveryStats = {
     completedCount: 0,
     failedCount: 0,
@@ -28,39 +40,72 @@ export class DeliveryManager {
   private onMissionUpdated?: DeliveryEventCallback;
   private lastEmittedSecond: number = -1;
 
-  constructor(onMissionUpdated?: DeliveryEventCallback) {
+  constructor(onMissionUpdated?: DeliveryEventCallback, minMissionDistance: number = 0) {
     this.onMissionUpdated = onMissionUpdated;
+    this.minMissionDistance = minMissionDistance;
   }
 
   /**
-   * Spawns a new delivery mission by picking random locations and package definitions.
+   * Applies the courier's career stat block (broker-licence payout multiplier and
+   * Chrono-Stamped Manifest timer bonus). Invalid values are ignored rather than
+   * clamped, so a bad payload can never wipe working tuning; call it again after any
+   * upgrade purchase to re-sync dispatch with the new profile.
    */
-  public generateNewMission(): ActiveMission {
-    // 1. Pick a random package
-    const pkgIndex = Math.floor(Math.random() * PACKAGE_CATALOG.length);
-    const packageDef = PACKAGE_CATALOG[pkgIndex] as PackageDefinition;
+  public applyProgressionTuning(tuning: {
+    rewardMultiplier?: number;
+    timerBonusSeconds?: number;
+  }): void {
+    if (
+      tuning.rewardMultiplier !== undefined &&
+      Number.isFinite(tuning.rewardMultiplier) &&
+      tuning.rewardMultiplier >= 0
+    ) {
+      this.rewardMultiplier = tuning.rewardMultiplier;
+    }
 
-    // 2. Pick distinct pickup and dropoff locations
-    const availableLocs = [...SECTOR_LOCATIONS];
-    const pickupIdx = Math.floor(Math.random() * availableLocs.length);
-    const pickupLocation = availableLocs.splice(pickupIdx, 1)[0] as DeliveryLocation;
+    if (tuning.timerBonusSeconds !== undefined && Number.isFinite(tuning.timerBonusSeconds)) {
+      this.timerBonusSeconds = Math.max(0, Math.round(tuning.timerBonusSeconds));
+    }
+  }
 
-    const dropoffIdx = Math.floor(Math.random() * availableLocs.length);
-    const dropoffLocation = availableLocs[dropoffIdx] as DeliveryLocation;
 
-    // 3. Compute Euclidean transit distance
+  /**
+   * Spawns a new delivery mission from the generated city's locations.
+   * Returns `null` when the city cannot support a delivery (fewer than 2 locations).
+   */
+  public generateNewMission(
+    locations: readonly CityLocation[],
+    rng: SeededRandom
+  ): ActiveMission | null {
+    if (locations.length < 2) {
+      return null;
+    }
+
+    // 1. Pick a package
+    const packageDef: PackageDefinition = rng.pick(PACKAGE_CATALOG);
+
+    // 2. Pick a pickup and a far-enough drop-off (both guaranteed to be on road)
+    const [pickupLocation, dropoffLocation] = pickMissionLocations(
+      locations,
+      rng,
+      this.minMissionDistance
+    );
+
+    // 3. Compute straight-line transit distance
     const dx = dropoffLocation.x - pickupLocation.x;
     const dy = dropoffLocation.y - pickupLocation.y;
     const calculatedDistance = Math.hypot(dx, dy);
 
     // 4. Time limit formula:
-    // Generous for early testing: Base 12s + (distance / 180 px/s)
+    // Generous for early testing: Base 12s + (distance / 180 px/s), plus any bonus
+    // seconds granted by the Chrono-Stamped Manifest upgrade.
     const baseSeconds = 12;
     const transitSeconds = Math.round(calculatedDistance / 180);
-    const timeLimitSeconds = baseSeconds + transitSeconds;
+    const timeLimitSeconds = baseSeconds + transitSeconds + this.timerBonusSeconds;
 
+    this.missionCounter += 1;
     const mission: ActiveMission = {
-      id: `msn_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      id: `msn_${rng.seed}_${this.missionCounter}`,
       packageDef,
       pickupLocation,
       dropoffLocation,
@@ -105,7 +150,13 @@ export class DeliveryManager {
       this.currentMission.remainingTimeSeconds / this.currentMission.timeLimitSeconds
     );
     const timeBonus = Math.round(this.currentMission.packageDef.baseRewardCredits * 0.5 * timeRatio);
-    const finalCredits = this.currentMission.packageDef.baseRewardCredits + timeBonus;
+    // The broker-licence multiplier scales base pay and time bonus together. XP is left
+    // untouched on purpose: rank pacing stays identical for every build.
+    const finalCredits = applyRewardMultiplier(
+      this.currentMission.packageDef.baseRewardCredits,
+      timeBonus,
+      this.rewardMultiplier
+    );
     const finalXp = this.currentMission.packageDef.baseRewardXp;
 
     this.currentMission.status = 'success';

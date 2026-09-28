@@ -2,16 +2,16 @@
 
 import { useGameStore } from '@/stores/useGameStore';
 import { useGameBridge } from '@/hooks/useGameBridge';
-import { Pause, Play, RotateCcw } from 'lucide-react';
+import { Pause, Play, RefreshCw, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /**
- * GameHudControls provides discrete command buttons (Pause, Resume, Restart)
+ * GameHudControls provides discrete command buttons (Pause, Resume, Reroll, New City)
  * that send commands back into Phaser via the EventBus bridge.
  */
 export function GameHudControls() {
   const isPaused = useGameStore((s) => s.isPaused);
-  const { togglePause, restartMission } = useGameBridge();
+  const { togglePause, restartMission, regenerateCity } = useGameBridge();
 
   return (
     <div className="flex items-center gap-2">
@@ -38,6 +38,16 @@ export function GameHudControls() {
       >
         <RotateCcw className="w-4 h-4" />
         <span className="hidden sm:inline">REROLL</span>
+      </button>
+
+      {/* Regenerate City Button */}
+      <button
+        onClick={() => regenerateCity()}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-mono text-xs font-bold bg-cyber-dark/85 text-zinc-300 border border-cyber-border hover:border-neon-cyan/60 hover:text-neon-cyan transition-all shadow-lg cursor-pointer"
+        title="Generate a new procedural district (new seed)"
+      >
+        <RefreshCw className="w-4 h-4" />
+        <span className="hidden sm:inline">NEW CITY</span>
       </button>
     </div>
   );

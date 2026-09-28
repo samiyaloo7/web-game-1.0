@@ -12,6 +12,11 @@ export function useGameBridge() {
   const setMission = useGameStore((s) => s.setMission);
   const setTimerTick = useGameStore((s) => s.setTimerTick);
   const setStats = useGameStore((s) => s.setStats);
+  const setProgression = useGameStore((s) => s.setProgression);
+  const setCity = useGameStore((s) => s.setCity);
+  const setVitals = useGameStore((s) => s.setVitals);
+  const setThreat = useGameStore((s) => s.setThreat);
+  const setRunState = useGameStore((s) => s.setRunState);
   const setIsPaused = useGameStore((s) => s.setIsPaused);
   const setIsEngineReady = useGameStore((s) => s.setIsEngineReady);
 
@@ -26,6 +31,32 @@ export function useGameBridge() {
 
     const handleStats = (data: GameToUiEvents['stats:updated']) => {
       setStats(data);
+    };
+
+    /** Career snapshots are emitted only on real progression changes — never per frame. */
+    const handleProgression = (data: GameToUiEvents['progression:updated']) => {
+      setProgression(data);
+    };
+
+    const handleCity = (data: GameToUiEvents['city:generated']) => {
+      setCity(data);
+    };
+
+    const handleHealth = (data: GameToUiEvents['player:health-changed']) => {
+      setVitals(data);
+    };
+
+    /**
+     * Threat summaries are pre-quantised by `DroneDirector` precisely so this handler can
+     * write straight into React state. Never raise the emit rate without re-reading the
+     * "React render shielding" note in `ARCHITECTURE.md`.
+     */
+    const handleThreat = (data: GameToUiEvents['enemy:threat-changed']) => {
+      setThreat(data);
+    };
+
+    const handleRunState = (data: GameToUiEvents['game:run-state-changed']) => {
+      setRunState(data);
     };
 
     const handlePaused = (data: GameToUiEvents['game:paused-changed']) => {
@@ -43,6 +74,11 @@ export function useGameBridge() {
     EventBus.onEvent('mission:updated', handleMission);
     EventBus.onEvent('mission:tick', handleTick);
     EventBus.onEvent('stats:updated', handleStats);
+    EventBus.onEvent('progression:updated', handleProgression);
+    EventBus.onEvent('city:generated', handleCity);
+    EventBus.onEvent('player:health-changed', handleHealth);
+    EventBus.onEvent('enemy:threat-changed', handleThreat);
+    EventBus.onEvent('game:run-state-changed', handleRunState);
     EventBus.onEvent('game:paused-changed', handlePaused);
     EventBus.onEvent('game:ready', handleReady);
     EventBus.onEvent('game:destroyed', handleDestroyed);
@@ -51,11 +87,16 @@ export function useGameBridge() {
       EventBus.offEvent('mission:updated', handleMission);
       EventBus.offEvent('mission:tick', handleTick);
       EventBus.offEvent('stats:updated', handleStats);
+      EventBus.offEvent('progression:updated', handleProgression);
+      EventBus.offEvent('city:generated', handleCity);
+      EventBus.offEvent('player:health-changed', handleHealth);
+      EventBus.offEvent('enemy:threat-changed', handleThreat);
+      EventBus.offEvent('game:run-state-changed', handleRunState);
       EventBus.offEvent('game:paused-changed', handlePaused);
       EventBus.offEvent('game:ready', handleReady);
       EventBus.offEvent('game:destroyed', handleDestroyed);
     };
-  }, [setMission, setTimerTick, setStats, setIsPaused, setIsEngineReady]);
+  }, [setMission, setTimerTick, setStats, setProgression, setCity, setVitals, setThreat, setRunState, setIsPaused, setIsEngineReady]);
 
   // Command dispatch helpers (React -> Phaser)
   const togglePause = useCallback(() => {
@@ -66,8 +107,20 @@ export function useGameBridge() {
     EventBus.sendCommand('cmd:restart-mission');
   }, []);
 
+  /** Revives the courier and resets the district in place — no city regeneration. */
+  const restartRun = useCallback(() => {
+    EventBus.sendCommand('cmd:restart-run');
+  }, []);
+
+  /** Rolls a brand-new procedural city. Pass a seed to revisit a known district. */
+  const regenerateCity = useCallback((seed?: number | string) => {
+    EventBus.sendCommand('cmd:regenerate-city', { seed });
+  }, []);
+
   return {
     togglePause,
     restartMission,
+    restartRun,
+    regenerateCity,
   };
 }

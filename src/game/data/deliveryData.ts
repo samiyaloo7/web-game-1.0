@@ -1,4 +1,4 @@
-import { PackageDefinition, DeliveryLocation } from '../types/delivery';
+import { PackageDefinition } from '../types/delivery';
 
 /**
  * Catalog of package definitions.
@@ -40,50 +40,8 @@ export const PACKAGE_CATALOG: PackageDefinition[] = [
 ];
 
 /**
- * Pre-designated drop and pickup locations across Sector 04 (1280 x 720 canvas).
- * In future phases, these can come from Tiled map object layers or procedurally generated streets.
+ * NOTE: pickup/drop-off coordinates are no longer hardcoded here.
+ * `CityGenerator` produces mission locations for the generated district, and
+ * `DeliveryManager` receives them as plain data. See `src/game/data/cityData.ts`
+ * for the naming pools used while generating those locations.
  */
-export const SECTOR_LOCATIONS: DeliveryLocation[] = [
-  {
-    id: 'loc_slums_depot',
-    name: 'District 4 Underpass Depot',
-    zone: 'Neon Slums',
-    x: 140,
-    y: 130,
-  },
-  {
-    id: 'loc_cyber_clinic',
-    name: 'OmniMed Black Clinic',
-    zone: 'Midtown Alley',
-    x: 1140,
-    y: 140,
-  },
-  {
-    id: 'loc_dock_warehouse',
-    name: 'Sector Docks Bay 9',
-    zone: 'Industrial Basin',
-    x: 180,
-    y: 600,
-  },
-  {
-    id: 'loc_syndicate_tower',
-    name: 'Nexis High-Rise Helipad',
-    zone: 'Corporate Terrace',
-    x: 1100,
-    y: 580,
-  },
-  {
-    id: 'loc_arcade_den',
-    name: 'Akira Arcade Back-Door',
-    zone: 'Commercial Strip',
-    x: 640,
-    y: 120,
-  },
-  {
-    id: 'loc_subway_terminal',
-    name: 'Sub-Level Metro Gate 3',
-    zone: 'Sub-City',
-    x: 640,
-    y: 600,
-  },
-];

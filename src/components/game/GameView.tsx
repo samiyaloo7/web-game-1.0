@@ -5,8 +5,22 @@ import type Phaser from 'phaser';
 import { GameHudStats } from './GameHudStats';
 import { GameHudMission } from './GameHudMission';
 import { GameHudControls } from './GameHudControls';
+import { GameHudVitals } from './GameHudVitals';
+import { GameOverOverlay } from './GameOverOverlay';
 import { PauseOverlay } from './PauseOverlay';
 import { useGameBridge } from '@/hooks/useGameBridge';
+
+/**
+ * Reads an optional `?seed=` query param so a generated district can be shared or
+ * reproduced. Numeric seeds arrive as numbers; anything else is hashed as a string.
+ */
+function readSeedFromUrl(): number | string | undefined {
+  const raw = new URLSearchParams(window.location.search).get('seed');
+  if (raw === null || raw.trim() === '') return undefined;
+
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : raw;
+}
 
 /**
  * GameView encapsulates the Phaser 3 canvas and layers
@@ -32,7 +46,8 @@ export function GameView() {
 
         if (isCancelled || !containerRef.current) return;
 
-        const config = createGameConfig(containerRef.current);
+        // `?seed=` lets a district be shared, replayed, or debugged by URL.
+        const config = createGameConfig(containerRef.current, { seed: readSeedFromUrl() });
         gameRef.current = new PhaserModule.Game(config);
         setIsReady(true);
       } catch (err) {
@@ -62,8 +77,9 @@ export function GameView() {
       {/* 2. Top HUD Bar Overlay (z-20) */}
       <div className="absolute top-3 left-3 right-3 z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pointer-events-none">
         {/* Left: Mission Objectives & Target */}
-        <div className="pointer-events-auto w-full sm:w-auto">
+        <div className="pointer-events-auto w-full sm:w-auto flex flex-col gap-2">
           <GameHudMission />
+          <GameHudVitals />
         </div>
 
         {/* Right: Currency / XP / Score & Controls */}
@@ -73,8 +89,9 @@ export function GameView() {
         </div>
       </div>
 
-      {/* 3. Pause Overlay (z-30) */}
+      {/* 3. Pause / Game Over Overlays (z-30) */}
       <PauseOverlay />
+      <GameOverOverlay />
 
       {/* 4. Engine Loading Fallback */}
       {!isReady && (
