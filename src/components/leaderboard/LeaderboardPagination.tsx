@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { clampPage, totalPagesFor } from '@/lib/leaderboard/pagination';
 
 /**
  * Page controls for the board.
@@ -10,6 +11,10 @@ import { cn } from '@/lib/utils';
  * needs to know to fetch the right rows. Putting it in the URL makes the current
  * page shareable, bookmarkable, and correct on refresh — and it means "page 2"
  * renders fully-formed HTML rather than a spinner.
+ *
+ * The shared `pagination.ts` helpers are used rather than local arithmetic so
+ * this label can never claim "PAGE 999 OF 2": the server clamps the page before
+ * fetching, and the control clamps it again on display for the same reason.
  */
 export function LeaderboardPagination({
   page,
@@ -20,8 +25,8 @@ export function LeaderboardPagination({
   pageSize: number;
   totalEntries: number;
 }) {
-  const currentPage = Math.max(Math.floor(page) || 1, 1);
-  const totalPages = Math.max(1, Math.ceil(totalEntries / pageSize));
+  const totalPages = totalPagesFor(totalEntries, pageSize);
+  const currentPage = clampPage(page, totalPages);
   const hasPrev = currentPage > 1;
   const hasNext = currentPage < totalPages;
 

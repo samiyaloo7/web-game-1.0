@@ -383,8 +383,9 @@ create policy scores_public_read
   to anon, authenticated
   using (true);  -- leaderboard + own history are public by design
 -- No INSERT/UPDATE/DELETE policy: scores are written exclusively by the
--- server-side API route (/api/scores) using the service-role key, after the
--- caller's session has been verified — clients cannot forge rows directly.
+-- SECURITY DEFINER RPCs (submit_delivery / record_failure), which read
+-- auth.uid() and derive the payout server-side. Clients cannot forge rows
+-- directly, and no privileged credential is involved in the write path.
 
 -- ===========================================================================
 -- 11. GRANTS — least privilege, stated explicitly

@@ -24,8 +24,11 @@
 -- Concretely this migration:
 --   1. adds `package_defs` — the server's own copy of the reward catalog,
 --   2. adds a GENERATED `score` column so ranking is not a client number,
---   3. adds `submit_delivery()`, the single validated write path,
---   4. adds `leaderboard_page()` for keyset-free offset pagination with ranks.
+--   3. rebuilds `leaderboard` with `rank`/`best_score` — a DROP + CREATE, since
+--      the column list is reordered and `create or replace view` cannot express
+--      that (it matches columns by position and may only append),
+--   4. adds `submit_delivery()`, the single validated write path,
+--   5. adds `leaderboard_page()` for keyset-free offset pagination with ranks.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -124,8 +127,31 @@ create index if not exists scores_completed_score_idx
 -- and page 2 at once.
 --
 -- security_invoker (as in Step 9) keeps the caller's RLS in force.
+--
+-- DROP + CREATE, *not* `create or replace view`.
+--
+-- `create or replace view` matches existing columns by POSITION and is only
+-- allowed to APPEND new ones. The Step 9 view led with `username`; this one
+-- leads with `rank`, so Postgres rejects the replacement with
+--
+--   ERROR: 42P16: cannot change name of view column "username" to "rank"
+--   HINT:  Use ALTER VIEW ... RENAME COLUMN ... to change name of view column
+--
+-- The HINT is unhelpful here: the column list is reordered *and* widened, so
+-- there is no rename that produces this shape. A real drop is the only way.
+--
+-- Two consequences, both handled here:
+--   * DROP VIEW discards the view's grants, so SELECT is re-stated explicitly
+--     below instead of being left to Supabase's schema default privileges.
+--   * `leaderboard_page` (recreated in section 6) is dropped first. A SQL
+--     function records a dependency on every relation its body references, so
+--     leaving it in place would make `drop view` fail on a second run and break
+--     the "re-running is safe" promise.
 -- ---------------------------------------------------------------------------
-create or replace view public.leaderboard
+drop function if exists public.leaderboard_page(integer, integer);
+drop view if exists public.leaderboard;
+
+create view public.leaderboard
 with (security_invoker = on)
 as
 with per_player as (
@@ -167,6 +193,17 @@ from per_player
 -- board is not padded with empty ranks; `profile_id` is still exposed so the
 -- page can tell a signed-in courier "you have not scored yet".
 where has_deliveries;
+
+-- Re-granted because the DROP above discards the view's privileges. Explicit
+-- rather than inherited from Supabase's schema default privileges, matching how
+-- every other object in these migrations states its grants.
+--
+-- `security_invoker` means the view still runs under the caller's own policies,
+-- so `anon` also needs SELECT on the base relations (`profiles`, `scores`) —
+-- which migration 1 grants. This is what keeps the board readable while signed
+-- out, without ever giving away a column beyond the view's projection.
+revoke all on public.leaderboard from anon, authenticated;
+grant select on public.leaderboard to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. submit_delivery — THE only write path for scores

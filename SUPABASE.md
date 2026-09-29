@@ -17,7 +17,7 @@ the entire security model of this app.
 | Reaches the browser? | Yes — **by design** | **Never** |
 | Honours RLS? | Yes | **No — bypasses it entirely** |
 | Can read/write every row? | No | Yes |
-| Used in this app for | All client reads, auth | Only `POST /api/scores` |
+| Used in this app for | All client reads, auth | Nothing in the request path — admin scripts only |
 
 The anon key is public on purpose. Knowing it identifies you as *the role
 "anon"*, not as a person. Every query it makes is filtered by Row Level
@@ -246,6 +246,13 @@ Aggregates every courier's completed deliveries into career totals **inside
 Postgres**, so the client fetches a small page instead of downloading the whole
 score history. Exposes only `username` and totals — never ids or emails.
 
+> The migration rebuilds this view with `drop view` + `create view` rather than
+> `create or replace view`. That is deliberate: `create or replace` matches
+> columns by position and can only append, so it cannot turn the Step 9 shape
+> (`username, deliveries, …`) into this one (`rank, profile_id, username, …`) —
+> it fails with `42P16: cannot change name of view column "username" to "rank"`.
+> Because a drop discards grants, the migration re-grants `SELECT` explicitly.
+
 | Column | Meaning |
 |---|---|
 | `rank` | `dense_rank()` by total score — ties genuinely share a rank |
@@ -300,7 +307,12 @@ Dashboard → **SQL Editor** → paste
 `supabase/migrations/20260928090000_initial_schema.sql` → **Run**.
 
 It is idempotent (`IF NOT EXISTS`, `OR REPLACE`, `DROP ... IF EXISTS` before
-`CREATE POLICY`), so re-running is safe. Or via the CLI:
+`CREATE POLICY`), so re-running is safe. Then run
+`supabase/migrations/20260928120000_leaderboard.sql` the same way — it must come
+second, because it rebuilds the view the first file creates. It is likewise
+re-runnable: it drops `leaderboard_page` first so the `drop view` that follows
+has no dependents (the function would otherwise fail the drop with `42809` on
+any run after the first). Or via the CLI, which applies both in order:
 
 ```bash
 npx supabase link --project-ref <project-ref>

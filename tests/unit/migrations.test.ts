@@ -195,3 +195,64 @@ describe('SQL migrations are structurally sound', () => {
     });
   }
 });
+
+/**
+ * THE 42P16 GUARD
+ * ===============
+ *
+ * A database that already ran Step 9 has `public.leaderboard` led by
+ * `username`; the leaderboard migration rebuilds it led by `rank`.
+ * `create or replace view` matches existing columns by POSITION and may only
+ * append, so replacing in place fails at apply time with:
+ *
+ *     ERROR:  42P16: cannot change name of view column "username" to "rank"
+ *     HINT:   Use ALTER VIEW ... RENAME COLUMN ... to change name of view column
+ *
+ * — which is exactly what the first version of the migration did when it was
+ * pasted into the SQL Editor. The HINT is a dead end (the list is reordered
+ * *and* widened, so no rename produces this shape); the fix is DROP + CREATE.
+ *
+ * The drop itself has a trap: `leaderboard_page` records a dependency on the
+ * view, so dropping the view while the function exists fails with `42809` —
+ * on the SECOND run, once the function is already there. That ordering is
+ * guarded here too, because nothing else in the repo executes the SQL.
+ */
+describe('20260928120000 rebuilds the Step 9 view with DROP + CREATE', () => {
+  const sql = scrub(
+    readFileSync(
+      join(process.cwd(), 'supabase', 'migrations', '20260928120000_leaderboard.sql'),
+      'utf8'
+    )
+  );
+
+  it('never replaces the Step 9 view in place', () => {
+    const match = sql.match(/create\s+or\s+replace\s+view\s+public\.leaderboard/i);
+    expect(
+      match?.[0],
+      '`create or replace view public.leaderboard` fails with 42P16 against any database that already has the Step 9 shape (username first). Drop the view instead.'
+    ).toBeUndefined();
+  });
+
+  it('drops the view before creating it', () => {
+    const drop = sql.search(/drop\s+view\s+if\s+exists\s+public\.leaderboard\b/i);
+    const create = sql.search(/create\s+view\s+public\.leaderboard\b/i);
+    expect(drop, 'no `drop view if exists public.leaderboard` — the Step 9 view cannot be replaced.').toBeGreaterThanOrEqual(0);
+    expect(create, 'no `create view public.leaderboard` after the drop.').toBeGreaterThan(drop);
+  });
+
+  it('drops leaderboard_page before the view', () => {
+    const dropFn = sql.search(/drop\s+function\s+if\s+exists\s+public\.leaderboard_page\s*\(\s*integer\s*,\s*integer\s*\)/i);
+    const dropView = sql.search(/drop\s+view\s+if\s+exists\s+public\.leaderboard\b/i);
+    expect(dropFn, 'no `drop function if exists public.leaderboard_page(integer, integer)` — the view drop fails with 42809 on a re-run while the function depends on it.').toBeGreaterThanOrEqual(0);
+    expect(
+      dropFn,
+      'leaderboard_page must be dropped BEFORE the view: a SQL function records a dependency on every relation its body references.'
+    ).toBeLessThan(dropView);
+  });
+
+  it('restores the SELECT grant the drop discarded', () => {
+    const create = sql.search(/create\s+view\s+public\.leaderboard\b/i);
+    const grant = sql.search(/grant\s+select\s+on\s+public\.leaderboard\s+to\s+anon/i);
+    expect(grant, 'no `grant select on public.leaderboard` — DROP discards the old grants, leaving the board unreadable.').toBeGreaterThan(create);
+  });
+});

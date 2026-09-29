@@ -1,7 +1,18 @@
 import 'server-only';
 import { createSupabaseServerClient } from '../supabase/server';
 import { isSupabaseConfigured } from '../supabase/env';
+import { DEFAULT_PAGE_SIZE, clampPageSize } from './pagination';
 import type { Database } from '../supabase/database';
+
+// Re-exported so the loader, the page and the page controls all share one
+// definition of the page-size bounds. See `./pagination.ts`.
+export {
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+  clampPage,
+  clampPageSize,
+  totalPagesFor,
+} from './pagination';
 
 /**
  * LEADERBOARD READS
@@ -36,11 +47,6 @@ import type { Database } from '../supabase/database';
 
 export type LeaderboardRow = Database['public']['Views']['leaderboard']['Row'];
 
-/** Hard ceiling, mirrored from `leaderboard_page`'s `least(50, …)`. */
-export const MAX_PAGE_SIZE = 50;
-
-export const DEFAULT_PAGE_SIZE = 25;
-
 /**
  * One page of the board, or a typed failure. Returning a discriminated union
  * rather than throwing lets the page render a real error state instead of a
@@ -60,7 +66,7 @@ export async function loadLeaderboardPage(
 
   // Clamp locally as well as in SQL: it keeps the offset arithmetic sane and
   // means a hostile `?page=99999999` cannot become a huge OFFSET.
-  const safeSize = Math.min(Math.max(Math.floor(pageSize) || DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const safeSize = clampPageSize(pageSize);
   const safePage = Math.max(Math.floor(page) || 1, 1);
   const offset = (safePage - 1) * safeSize;
 

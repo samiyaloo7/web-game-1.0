@@ -11,6 +11,7 @@ import {
   DEFAULT_PAGE_SIZE,
   type LeaderboardRow,
 } from '@/lib/leaderboard/server';
+import { clampPage, totalPagesFor } from '@/lib/leaderboard/pagination';
 import { getCurrentUser } from '@/lib/auth/session';
 
 export const metadata: Metadata = {
@@ -45,11 +46,30 @@ export default async function LeaderboardPage({
   const parsedPage = Number.parseInt(params.page ?? '1', 10);
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
-  const [result, totalEntries, user] = await Promise.all([
+  const [firstPageResult, totalEntries, user] = await Promise.all([
     loadLeaderboardPage(page, DEFAULT_PAGE_SIZE),
     countLeaderboardEntries(),
     getCurrentUser(),
   ]);
+
+  /*
+   * Clamp an out-of-range deep link to the last real page.
+   *
+   * `?page=999` on a two-page board used to load zero rows and fall into the
+   * EMPTY state — "NO TRANSMISSIONS LOGGED" on a board that is full — while the
+   * controls underneath read "PAGE 999 OF 2". An empty page and an empty board
+   * are different facts, and conflating them is the same failure this file
+   * already refuses to make between empty and error.
+   *
+   * The count is fetched in parallel with the first page, so this costs a
+   * second query only in the rare out-of-range case.
+   */
+  const pageSize = firstPageResult.ok ? firstPageResult.pageSize : DEFAULT_PAGE_SIZE;
+  const effectivePage = clampPage(page, totalPagesFor(totalEntries, pageSize));
+  const result =
+    firstPageResult.ok && effectivePage !== page
+      ? await loadLeaderboardPage(effectivePage, DEFAULT_PAGE_SIZE)
+      : firstPageResult;
 
   return (
     <div className="flex-1 max-w-6xl mx-auto w-full p-4 sm:p-8">
