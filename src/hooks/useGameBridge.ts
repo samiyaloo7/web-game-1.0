@@ -19,6 +19,7 @@ export function useGameBridge() {
   const setRunState = useGameStore((s) => s.setRunState);
   const setIsPaused = useGameStore((s) => s.setIsPaused);
   const setIsEngineReady = useGameStore((s) => s.setIsEngineReady);
+  const setOccludedPanelIds = useGameStore((s) => s.setOccludedPanelIds);
 
   useEffect(() => {
     const handleMission = (data: GameToUiEvents['mission:updated']) => {
@@ -63,12 +64,24 @@ export function useGameBridge() {
       setIsPaused(data.isPaused);
     };
 
+    /**
+     * Which HUD panels are covering the objective. The scene computes this from pure
+     * geometry and emits only when the *set* changes, so this can write straight into
+     * React state without reintroducing per-frame renders.
+     */
+    const handleOcclusion = (data: GameToUiEvents['hud:occlusion-changed']) => {
+      setOccludedPanelIds(data.occludedPanelIds);
+    };
+
     const handleReady = () => {
       setIsEngineReady(true);
     };
 
     const handleDestroyed = () => {
       setIsEngineReady(false);
+      // With the simulation gone there is nothing left to be covering, so the panels
+      // must not stay stuck at low opacity.
+      setOccludedPanelIds([]);
     };
 
     EventBus.onEvent('mission:updated', handleMission);
@@ -80,6 +93,7 @@ export function useGameBridge() {
     EventBus.onEvent('enemy:threat-changed', handleThreat);
     EventBus.onEvent('game:run-state-changed', handleRunState);
     EventBus.onEvent('game:paused-changed', handlePaused);
+    EventBus.onEvent('hud:occlusion-changed', handleOcclusion);
     EventBus.onEvent('game:ready', handleReady);
     EventBus.onEvent('game:destroyed', handleDestroyed);
 
@@ -93,10 +107,11 @@ export function useGameBridge() {
       EventBus.offEvent('enemy:threat-changed', handleThreat);
       EventBus.offEvent('game:run-state-changed', handleRunState);
       EventBus.offEvent('game:paused-changed', handlePaused);
+      EventBus.offEvent('hud:occlusion-changed', handleOcclusion);
       EventBus.offEvent('game:ready', handleReady);
       EventBus.offEvent('game:destroyed', handleDestroyed);
     };
-  }, [setMission, setTimerTick, setStats, setProgression, setCity, setVitals, setThreat, setRunState, setIsPaused, setIsEngineReady]);
+  }, [setMission, setTimerTick, setStats, setProgression, setCity, setVitals, setThreat, setRunState, setIsPaused, setIsEngineReady, setOccludedPanelIds]);
 
   // Command dispatch helpers (React -> Phaser)
   const togglePause = useCallback(() => {

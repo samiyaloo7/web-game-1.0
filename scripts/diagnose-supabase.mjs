@@ -34,13 +34,6 @@ const fail = (m) => {
   failures++;
   console.log(`  ✗ ${m}`);
 };
-// The service key is only needed by POST /api/scores, so a placeholder there
-// must NOT block the schema check below — that is how this bug got hard to see.
-let warnings = 0;
-const warn = (m) => {
-  warnings++;
-  console.log(`  ⚠ ${m}`);
-};
 const pass = (m) => console.log(`  ✓ ${m}`);
 
 console.log('\n── Environment ──────────────────────────────────────');
@@ -52,9 +45,9 @@ if (!anon) fail('NEXT_PUBLIC_SUPABASE_ANON_KEY (or PUBLISHABLE_KEY) is missing')
 else if (isPlaceholder(anon)) fail('anon key is still the example placeholder');
 else pass(`anon key set (${anon.slice(0, 12)}…, ${anon.length} chars)`);
 
-if (!service) warn('SUPABASE_SERVICE_ROLE_KEY missing — leaderboard submissions will fail');
-else if (isPlaceholder(service)) warn('SUPABASE_SERVICE_ROLE_KEY is still the example placeholder');
-else pass('service key set (server only)');
+if (!service) pass('service key not set — not needed, /api/scores uses the caller JWT');
+else if (isPlaceholder(service)) pass('service key is a placeholder — not needed, /api/scores uses the caller JWT');
+else pass('service key set (unused by this app)');
 
 // Only the public keys are required to continue: the schema check below runs
 // under the anon key, exactly as the app does.
@@ -146,17 +139,13 @@ if (lb.error) {
 }
 
 console.log('\n── Guidance ─────────────────────────────────────────');
-if (warnings) {
-  console.log('Non-blocking: the service-role key is still a placeholder.');
-  console.log('Registration and login work without it, but /api/scores will');
-  console.log('return 503 until it is set.\n');
-}
 if (failures) {
-  console.log('Some objects are missing. Apply the migration:\n');
+  console.log('Some objects are missing. Apply the migrations, newest last:\n');
   console.log('  1. Supabase Dashboard → SQL Editor');
   console.log('  2. Paste supabase/migrations/20260928090000_initial_schema.sql');
-  console.log('  3. Click Run\n');
-  console.log('It is idempotent, so re-running is safe.');
+  console.log('  3. Paste supabase/migrations/20260928120000_leaderboard.sql');
+  console.log('  4. Click Run\n');
+  console.log('Both are idempotent, so re-running either is safe.');
 } else {
   console.log('Schema is installed and secured. Next:');
   console.log('  • Authentication → Sign In / Providers → Email → Enable Email provider');

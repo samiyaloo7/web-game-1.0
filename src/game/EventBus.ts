@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { ProgressionSnapshot, ProgressionState } from './types/progression';
+import type { Occluder } from './systems/HudOcclusion';
 
 
 /**
@@ -100,7 +101,28 @@ export interface GameToUiEvents {
     /** What the client believes it earned. Audit only — the server ignores it. */
     claimedCredits: number;
   };
-  /** Engine lifecycle notifications */
+  /**
+   * Emitted when the set of HUD panels currently covering a tracked entity changes.
+   *
+   * The scene computes this from pure geometry and gates it on a signature, so a
+   * courier weaving under a panel boundary at 60 FPS still produces only a handful
+   * of events per minute — the `ARCHITECTURE.md` §11 render-shielding rule applies
+   * here as much as anywhere else.
+   *
+   * Panels fade rather than disappear: live readouts (timer, hull) stay legible,
+   * they just stop hiding the world behind them.
+   */
+  'hud:occlusion-changed': {
+    /** Panel ids currently covering something, e.g. `['hud-mission']`. */
+    occludedPanelIds: string[];
+  };
+  /**
+   * Engine lifecycle notifications.
+   *
+   * `game:ready` is emitted by the scene once its command listeners are registered and
+   * the first dispatch exists; `game:destroyed` on shutdown. The HUD uses the pair to
+   * tell "the simulation is live" from "the canvas is merely on screen".
+   */
   'game:ready': void;
   'game:destroyed': void;
 }
@@ -127,6 +149,20 @@ export interface UiToGameCommands {
    * reset — the run in progress keeps its hull, speed and current mission.
    */
   'cmd:load-progression': { state: ProgressionState };
+  /**
+   * The HUD publishes its measured panel rects, in the canvas's own 1280x720 space.
+   *
+   * This is the seam between the two coordinate systems. React owns the DOM layout
+   * (it knows how wide a panel actually rendered), Phaser owns the camera (it knows
+   * what is on screen) — neither can see the other's half, and hard-coding panel
+   * sizes here would silently rot the moment the HUD is edited. So React measures
+   * once per layout change and reports; the scene converts that into which panels
+   * are covering what.
+   *
+   * Rects are already scaled into game pixels by the sender, so the scene never has
+   * to reason about CSS transforms or the canvas letterbox.
+   */
+  'cmd:sync-hud-occluders': { occluders: Occluder[] };
 }
 
 export type AllGameEvents = GameToUiEvents & UiToGameCommands;

@@ -9,6 +9,7 @@ import { GameHudVitals } from './GameHudVitals';
 import { GameOverOverlay } from './GameOverOverlay';
 import { PauseOverlay } from './PauseOverlay';
 import { useGameBridge } from '@/hooks/useGameBridge';
+import { useHudOcclusion } from '@/hooks/useHudOcclusion';
 import { useProgressionSync } from '@/hooks/useProgressionSync';
 import { useScoreReporting } from '@/hooks/useScoreReporting';
 
@@ -30,11 +31,21 @@ function readSeedFromUrl(): number | string | undefined {
  */
 export function GameView() {
   const containerRef = useRef<HTMLDivElement>(null);
+  /**
+   * Wraps both the canvas and the HUD panels: the measurement and the coordinate
+   * origin for occlusion have to span both, since the canvas establishes the scale
+   * and the panels are its siblings, not its children.
+   */
+  const rootRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   // Mount EventBus listener bridge
   useGameBridge();
+
+  // Report where the HUD panels actually rendered, so the scene can tell when one of
+  // them is covering the parcel or the drop pad.
+  useHudOcclusion(rootRef);
 
   // Hydrate the career from Supabase on mount and persist changes back.
   // No-ops entirely for guests, so an unconfigured project still plays.
@@ -76,7 +87,10 @@ export function GameView() {
   }, []);
 
   return (
-    <div className="relative w-full aspect-[16/9] max-w-5xl rounded-lg overflow-hidden border border-cyber-border bg-[#0a0c14] shadow-2xl select-none">
+    <div
+      ref={rootRef}
+      className="relative w-full aspect-[16/9] max-w-5xl rounded-lg overflow-hidden border border-cyber-border bg-[#0a0c14] shadow-2xl select-none"
+    >
       {/* 1. Phaser Canvas Mount Layer (z-0) */}
       <div
         ref={containerRef}

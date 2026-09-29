@@ -232,6 +232,14 @@ begin
   --    so a null uid here means "no valid session".
   if v_uid is null then
     raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  -- 2. Unknown package: the single most important rejection. Accepting it would
+  --    let a caller invent a payout by guessing ids.
+  select * into v_def from public.package_defs where id = p_package_id;
+  if not found then
+    raise exception 'unknown package: %', p_package_id;
+  end if;
 
   -- 3. Clamp the ratio into 0..1 rather than rejecting out-of-range values.
   --    Clamping means a buggy or tampered client degrades to a legitimate score
@@ -283,12 +291,25 @@ begin
 
   -- 7. Capture the previous best BEFORE inserting, so the new-best flag compares
   --    against the real prior record rather than the row just written.
-  select coalesce(max(score), 0)::integer into v_previous_best
-  from public.scores
-  where profile_id = v_uid and status = 'completed';
+  --
+  --    `prev.` is load-bearing, not decoration: `score` is also the name of an
+  --    output column of this function (see RETURNS TABLE above), and plpgsql
+  --    treats an output column name as a variable. A bare `max(score)` here would
+  --    be ambiguous between that variable and `scores.score`, and plpgsql's
+  --    default `variable_conflict = error` would refuse to run the function.
+  select coalesce(max(prev.score), 0)::integer into v_previous_best
+  from public.scores prev
+  where prev.profile_id = v_uid and prev.status = 'completed';
 
   -- 8. Insert. `profile_id` comes from the session; the request cannot choose it.
-  insert into public.scores (
+  --
+  --    The target is aliased `s` so the RETURNING list can be qualified. `credits`,
+  --    `xp` and `score` are output column names of this function, which makes them
+  --    plpgsql variables: a bare `returning credits, xp, score` would be ambiguous
+  --    against the same-named columns of `scores` and refused. The column list and
+  --    the VALUES clause need no qualification, because a name in the target column
+  --    list is resolved as a column and is never substituted for.
+  insert into public.scores as s (
     profile_id, status, credits, xp, time_seconds, package_id, claimed_credits
   )
   values (
@@ -297,12 +318,21 @@ begin
     p_package_id,
     greatest(0, p_claimed_credits)
   )
-  returning id, credits, xp, score
+  returning s.id, s.credits, s.xp, s.score
     into v_new_id, v_credits, v_xp, v_awarded_score;
 
   return query
     select v_new_id, v_credits, v_xp, v_awarded_score, (v_awarded_score > v_previous_best);
 end;
+$$;
+
+-- SECURITY DEFINER functions run as their owner, which makes them executable by
+-- PUBLIC the moment they are created — revoke that, then grant only to
+-- signed-in callers.
+revoke execute on function public.submit_delivery(text, numeric, numeric, integer)
+  from public, anon;
+grant execute on function public.submit_delivery(text, numeric, numeric, integer)
+  to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. record_failure — failed deliveries
@@ -350,10 +380,14 @@ revoke execute on function public.record_failure(text, numeric) from public, ano
 grant execute on function public.record_failure(text, numeric) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 6. leaderboard_page — offset pagination with a total count
+-- 6. leaderboard_page — offset pagination carrying true global ranks
 --
--- Returns one page of the board plus the total row count, so the UI can render
--- "Page 1 of 7" without a second round-trip.
+-- Returns one page of the board, and nothing else. It deliberately does NOT also
+-- return a total row count: the ranking view is a GROUP BY over every score row,
+-- so counting it here would aggregate the whole population on every page
+-- request just to render "Page x of y". The page does that separately and
+-- cheaply, with a HEAD count against the view
+-- (`countLeaderboardEntries` in src/lib/leaderboard/server.ts).
 --
 -- SECURITY INVOKER (the default) so the caller's RLS on `scores`/`profiles`
 -- still applies — the board shows exactly what an anonymous read of the view
@@ -385,12 +419,29 @@ stable
 security invoker
 set search_path = ''
 as $$
+  -- `lb.` keeps the ORDER BY independent of the function's own output column
+  -- names, which are in scope for a SQL function just as they are for plpgsql.
   with page as (
     select *
-    from public.leaderboard
-    order by total_score desc, username asc
+    from public.leaderboard lb
+    order by lb.total_score desc, lb.username asc
     limit least(50, greatest(1, coalesce(p_limit, 25)))
     offset greatest(0, coalesce(p_offset, 0))
+  )
+  select
+    page.rank,
+    page.profile_id,
+    page.username,
+    page.deliveries,
+    page.total_score,
+    page.total_credits,
+    page.best_score,
+    page.last_delivery_at
+  from page;
+$$;
+
+revoke execute on function public.leaderboard_page(integer, integer) from public;
+grant execute on function public.leaderboard_page(integer, integer) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 7. recent_delivery_count — the anti-spam primitive
@@ -424,38 +475,4 @@ $$;
 
 revoke execute on function public.recent_delivery_count(integer, integer) from public, anon;
 grant execute on function public.recent_delivery_count(integer, integer) to authenticated;
-
-  )
-  select
-    page.rank,
-    page.profile_id,
-    page.username,
-    page.deliveries,
-    page.total_score,
-    page.total_credits,
-    page.best_score,
-    page.last_delivery_at
-  from page;
-$$;
-
-revoke execute on function public.leaderboard_page(integer, integer) from public;
-grant execute on function public.leaderboard_page(integer, integer) to anon, authenticated;
-
-$$;
-
--- SECURITY DEFINER functions are executable by PUBLIC on creation — revoke, then
--- grant only to signed-in callers.
-revoke execute on function public.submit_delivery(text, numeric, numeric, integer)
-  from public, anon;
-grant execute on function public.submit_delivery(text, numeric, numeric, integer)
-  to authenticated;
-
-  end if;
-
-  -- 2. Unknown package: the single most important rejection. Accepting it would
-  --    let a caller invent a payout by guessing ids.
-  select * into v_def from public.package_defs where id = p_package_id;
-  if not found then
-    raise exception 'unknown package: %', p_package_id;
-  end if;
 

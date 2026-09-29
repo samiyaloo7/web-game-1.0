@@ -2,6 +2,7 @@
 
 import { useGameStore } from '@/stores/useGameStore';
 import { useGameBridge } from '@/hooks/useGameBridge';
+import { OCCLUDED_PANEL_CLASS, usePanelOccluded } from '@/hooks/useHudOcclusion';
 import { Pause, Play, RefreshCw, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -13,8 +14,18 @@ export function GameHudControls() {
   const isPaused = useGameStore((s) => s.isPaused);
   const { togglePause, restartMission, regenerateCity } = useGameBridge();
 
+  // Bottom-right of the top bar — the least likely occluder, but the drop pad area is
+  // large enough to reach it on a narrow viewport.
+  const isOccluded = usePanelOccluded('hud-controls');
+
   return (
-    <div className="flex items-center gap-2">
+    <div
+      data-hud-panel="hud-controls"
+      className={cn(
+        'flex items-center gap-2 transition-opacity duration-300',
+        isOccluded && OCCLUDED_PANEL_CLASS
+      )}
+    >
       {/* Pause / Resume Button */}
       <button
         onClick={togglePause}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useGameStore } from '@/stores/useGameStore';
+import { OCCLUDED_PANEL_CLASS, usePanelOccluded } from '@/hooks/useHudOcclusion';
 import { Package, MapPin, Navigation, Clock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -21,6 +22,11 @@ export function GameHudMission() {
   const cityCols = useGameStore((s) => s.city.cols);
   const cityRows = useGameStore((s) => s.city.rows);
   const cityLocationCount = useGameStore((s) => s.city.locationCount);
+
+  // The mission panel is the largest block in the top-left, so it is the panel most
+  // likely to be hiding the parcel. When it is, it fades to a ghost rather than
+  // staying an opaque lid over the district.
+  const isOccluded = usePanelOccluded('hud-mission');
 
   // Status visual configurations
   const statusConfig = {
@@ -60,9 +66,11 @@ export function GameHudMission() {
 
   return (
     <div
+      data-hud-panel="hud-mission"
       className={cn(
-        'w-full max-w-lg bg-cyber-dark/85 backdrop-blur-md border rounded-lg p-3 sm:p-4 font-mono shadow-xl transition-colors duration-300',
-        statusConfig.borderColor
+        'w-full max-w-lg bg-cyber-dark/85 backdrop-blur-md border rounded-lg p-3 sm:p-4 font-mono shadow-xl transition-[opacity,border-color] duration-300',
+        statusConfig.borderColor,
+        isOccluded && OCCLUDED_PANEL_CLASS
       )}
     >
       {/* Header: Status badge & Timer */}

@@ -447,7 +447,13 @@ Format: `<type>(<scope>): <subject>`
 3. **React Render Shielding:**
    - Never bind high-frequency variables (like player coordinates `(x, y)` updating 60 times/sec) to React state.
    - Only bind low-frequency game events (package picked up, health dropped by 10%, game over) to React.
-4. **Next.js Dynamic Imports:**
+   - A tracked entity entering a HUD panel's footprint is **change-gated**: `GameScene` compares an occluded-panel signature each frame and emits `hud:occlusion-changed` only when the *set* differs, so drifting under a panel edge costs one event rather than one per frame.
+4. **HUD Occlusion (overlay must not hide the objective):**
+   - The HUD is DOM above the canvas, so the parcel or drop pad can drift *underneath* a panel and become invisible.
+   - Each side contributes only its own half: the HUD measures its DOM rects and publishes them over `cmd:sync-hud-occluders` (in game pixels, via `cssRectToGameRect`), and `GameScene` decides what those rects cover. Neither half can be derived by the other, so neither is hard-coded.
+   - The geometry lives in the pure, engine-free `src/game/systems/HudOcclusion.ts` (like `ProgressionMath` and `DroneBrain`), and is unit-tested without a canvas.
+   - Two mechanisms: covering panels **fade to low alpha** (readouts stay legible, the world shows through) and the objective gets an **edge chevron** clamped to the safe-area boundary. The fade is precise and per-panel; the safe area is the conservative fallback that also covers an off-screen objective.
+5. **Next.js Dynamic Imports:**
    - Load Phaser strictly dynamically with `ssr: false`:
    ```typescript
    const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), { ssr: false });

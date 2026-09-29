@@ -98,6 +98,15 @@ interface GameStoreState {
    * trigger the celebration.
    */
   isNewPersonalBest: boolean;
+  /**
+   * Ids of the HUD panels currently covering something the courier needs to see.
+   *
+   * Written only by the game over `hud:occlusion-changed`, and already
+   * signature-gated scene-side — a panel that covers the parcel for ten seconds
+   * produces exactly one update, not six hundred. Panels read this to lower their own
+   * opacity, so live readouts stay on screen without hiding the world behind them.
+   */
+  occludedPanelIds: string[];
 
   // Actions
   setMission: (mission: GameToUiEvents['mission:updated']) => void;
@@ -112,6 +121,7 @@ interface GameStoreState {
   setIsEngineReady: (isReady: boolean) => void;
   setSyncStatus: (status: GameStoreState['syncStatus']) => void;
   setIsNewPersonalBest: (isNewBest: boolean) => void;
+  setOccludedPanelIds: (occludedPanelIds: string[]) => void;
   resetSession: () => void;
 }
 
@@ -195,6 +205,7 @@ export const useGameStore = create<GameStoreState>((set) => ({
   isEngineReady: false,
   syncStatus: 'idle',
   isNewPersonalBest: false,
+  occludedPanelIds: [],
 
   setMission: (mission) =>
     set({
@@ -239,6 +250,8 @@ export const useGameStore = create<GameStoreState>((set) => ({
 
   setIsNewPersonalBest: (isNewPersonalBest) => set({ isNewPersonalBest }),
 
+  setOccludedPanelIds: (occludedPanelIds) => set({ occludedPanelIds }),
+
   /**
    * Clears the *session* view only. `progression` is deliberately untouched: the career
    * profile is game state that outlives any single run and is republished by the game
@@ -254,5 +267,6 @@ export const useGameStore = create<GameStoreState>((set) => ({
       run: initialRun,
       isPaused: false,
       isEngineReady: false,
+      occludedPanelIds: [],
     }),
 }));

@@ -20,12 +20,43 @@ import { PlayerProgression } from '../systems/PlayerProgression';
 import { DEFAULT_BASE_STATS } from '../types/progression';
 import { computeTimeRatio } from '../../lib/scoring/delivery';
 import type { ProgressionState } from '../types/progression';
+import {
+  clampToSafeArea,
+  computeOcclusionSignature,
+  computeSafeArea,
+  deflateRect,
+  findOccludersFor,
+  indicatorAngle,
+  pointInRect,
+} from '../systems/HudOcclusion';
+import type { Occluder, Point, Rect } from '../systems/HudOcclusion';
+import { GAME_HEIGHT, GAME_WIDTH } from '../viewport';
 
 /** Options accepted by the scene instance built in `config.ts`. */
 export interface GameSceneOptions {
   /** Seed for the procedural city. Omit it to roll a fresh city for every run. */
   seed?: number | string;
 }
+
+/**
+ * Half-extent used to box a tracked entity for the HUD occlusion test, in world units.
+ *
+ * Deliberately generous: the parcel's beacon ring (radius 48) and the drop pad's
+ * landing circle (radius 54) are both wider than the sprite at their centre, and
+ * fading a panel a few pixels early is a much better failure than leaving a crate
+ * hidden underneath one.
+ */
+const TRACKED_ENTITY_RADIUS = 44;
+
+/**
+ * How far inside the safe-area boundary the objective chevron is anchored.
+ *
+ * The chevron points *away* from the anchor, toward the objective, so anchoring it on
+ * the boundary would bury its tip under the very panel it is pointing past. Pulling the
+ * anchor back by the chevron's own reach (the 16px tip plus a 4px breathing gap) lands
+ * the tip exactly on the boundary — the marker's whole body stays in clear air.
+ */
+const INDICATOR_REACH = 20;
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
@@ -34,6 +65,13 @@ export class GameScene extends Phaser.Scene {
   private activePackageDrop: PackageDrop | null = null;
   private activeDestinationPad: DestinationPad | null = null;
   private guideArrow!: Phaser.GameObjects.Graphics;
+  /**
+   * Screen-space chevron marking where the current objective is when the HUD (or the
+   * viewport edge) is hiding it. Pinned to the camera with `setScrollFactor(0)` so it
+   * lives in viewport coordinates, unlike `guideArrow`, which orbits the courier out
+   * in the world.
+   */
+  private hudIndicator!: Phaser.GameObjects.Graphics;
   private notificationBanner!: Phaser.GameObjects.Container;
   private bannerTitle!: Phaser.GameObjects.Text;
   private bannerSub!: Phaser.GameObjects.Text;
@@ -66,6 +104,18 @@ export class GameScene extends Phaser.Scene {
   private runElapsedSeconds: number = 0;
   /** Last vitals signature pushed to React, so unchanged frames emit nothing. */
   private lastVitalsSignature: string = '';
+
+  /**
+   * Measured HUD panel rects, in game pixels, published by React over
+   * `cmd:sync-hud-occluders` (see `useHudOcclusion`).
+   *
+   * The scene cannot measure these itself: panel sizes come from CSS text flow, and
+   * `game/` deliberately owns no DOM. Empty means "nothing measured yet", which the
+   * geometry correctly reads as "nothing is covering anything".
+   */
+  private hudOccluders: Occluder[] = [];
+  /** Last occluded-panel set pushed to React, so unchanged frames emit nothing. */
+  private lastOcclusionSignature: string = '';
 
   // Bound command handler references for clean removal
   private handleTogglePauseCommand = (): void => {
@@ -101,6 +151,22 @@ export class GameScene extends Phaser.Scene {
   private handleLoadProgressionCommand = (data: { state: ProgressionState }): void => {
     this.progression.hydrate(data.state);
     this.applyProgressionLoadout();
+  };
+
+  /**
+   * Accepts freshly measured HUD panel rects from the DOM layer.
+   *
+   * Deliberately *not* sanitised beyond the geometry itself: these come from our own
+   * HUD, and the worst a wrong rect can do is fade a panel or place a chevron
+   * slightly oddly. Nothing here feeds gameplay state.
+   *
+   * The signature is reset so the next frame re-publishes even if the set of occluded
+   * panels happens to be unchanged — panel rects moving while the *set* stays the same
+   * still changes which panel is covering what, and React needs to see that.
+   */
+  private handleSyncHudOccludersCommand = (data: { occluders: Occluder[] }): void => {
+    this.hudOccluders = data.occluders;
+    this.lastOcclusionSignature = '';
   };
 
   constructor(options: GameSceneOptions = {}) {
@@ -139,6 +205,13 @@ export class GameScene extends Phaser.Scene {
     this.guideArrow = this.add.graphics();
     this.guideArrow.setDepth(5);
 
+    // Objective marker for when the HUD (or the edge of the screen) is hiding the
+    // parcel. Scroll factor 0 puts it in viewport space, where the safe-area geometry
+    // is expressed; depth 6 keeps it above the guide arrow but below the banner.
+    this.hudIndicator = this.add.graphics();
+    this.hudIndicator.setDepth(6);
+    this.hudIndicator.setScrollFactor(0);
+
     this.createNotificationBanner();
 
     // Register React UI command listeners
@@ -148,6 +221,7 @@ export class GameScene extends Phaser.Scene {
     EventBus.onCommand('cmd:regenerate-city', this.handleRegenerateCityCommand);
     EventBus.onCommand('cmd:restart-run', this.handleRestartRunCommand);
     EventBus.onCommand('cmd:load-progression', this.handleLoadProgressionCommand);
+    EventBus.onCommand('cmd:sync-hud-occluders', this.handleSyncHudOccludersCommand);
 
     // Clean up event listeners on scene shutdown
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -327,6 +401,7 @@ export class GameScene extends Phaser.Scene {
     EventBus.offCommand('cmd:regenerate-city', this.handleRegenerateCityCommand);
     EventBus.offCommand('cmd:restart-run', this.handleRestartRunCommand);
     EventBus.offCommand('cmd:load-progression', this.handleLoadProgressionCommand);
+    EventBus.offCommand('cmd:sync-hud-occluders', this.handleSyncHudOccludersCommand);
   }
 
   public togglePause(): void {
@@ -502,6 +577,9 @@ export class GameScene extends Phaser.Scene {
       this.checkInteractions(mission);
       this.updateGuideArrow(mission);
     }
+
+    // Runs even with no mission, so a finished assignment clears its marker.
+    this.updateHudOcclusion(mission);
 
     if (
       mission &&
@@ -718,6 +796,180 @@ export class GameScene extends Phaser.Scene {
     );
     this.guideArrow.closePath();
     this.guideArrow.fillPath();
+  }
+
+  /**
+   * Converts a world position into viewport ("screen") coordinates, in game pixels
+   * measured from the canvas's top-left — the same space the HUD's measured rects
+   * arrive in.
+   *
+   * `worldView` already folds in the camera scroll, and it accounts for the camera
+   * being *clamped* at the map edges, which is exactly the case that puts the parcel
+   * under the top-left HUD: the world stops scrolling, the courier keeps moving, and
+   * the two drift into the same screen region. Deriving the offset from the camera
+   * rather than from the courier's position keeps this correct there.
+   *
+   * The `zoom` multiply matters even though nothing zooms today: `worldView` shrinks
+   * as zoom rises, so without it the two coordinate systems would silently diverge
+   * the moment a zoom effect was added.
+   */
+  private worldToScreenPoint(worldX: number, worldY: number): Point {
+    const camera = this.cameras.main;
+
+    return {
+      x: (worldX - camera.worldView.x) * camera.zoom,
+      y: (worldY - camera.worldView.y) * camera.zoom,
+    };
+  }
+
+  /** Viewport-space bounding box of a world-space entity with the given radius. */
+  private worldToScreenRect(worldX: number, worldY: number, worldRadius: number): Rect {
+    const centre = this.worldToScreenPoint(worldX, worldY);
+    const radius = worldRadius * this.cameras.main.zoom;
+
+    return {
+      x: centre.x - radius,
+      y: centre.y - radius,
+      width: radius * 2,
+      height: radius * 2,
+    };
+  }
+
+  /**
+   * World position and marker colour of whatever the courier is currently being asked
+   * to reach, or `null` when there is nothing to mark.
+   *
+   * Colours deliberately match the entities themselves (amber beacon for the crate,
+   * pink pad for the dropoff), so the marker reads as "the thing you can see" rather
+   * than as a third, unrelated icon.
+   */
+  private getObjectiveMarker(
+    mission: ActiveMission | null
+  ): { point: Point; color: number } | null {
+    if (mission?.status === 'pickup_available' && this.activePackageDrop) {
+      return {
+        point: { x: this.activePackageDrop.x, y: this.activePackageDrop.y },
+        color: 0xffaa00,
+      };
+    }
+
+    if (mission?.status === 'in_transit' && this.activeDestinationPad) {
+      return {
+        point: { x: this.activeDestinationPad.x, y: this.activeDestinationPad.y },
+        color: 0xff007f,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Decides which HUD panels are covering something that matters, tells React, and
+   * pins a chevron to the safe-area edge when the objective is hidden.
+   *
+   * Two mechanisms, both from the pure `HudOcclusion` geometry:
+   *
+   * 1. **Fade** — React drops the opacity of every panel id returned here. The panel
+   *    keeps its timer and controls, it just stops being an opaque lid over the map.
+   * 2. **Indicator** — once the objective leaves the safe area (a panel is over it, or
+   *    it is simply off-screen), a chevron appears on the boundary pointing at it, so
+   *    the crate is findable without hunting underneath the HUD.
+   *
+   * Tracking the courier as well as the objective is deliberate: the camera clamps at
+   * the map edges, so the player's own bike can slide under the top bar even when the
+   * objective cannot.
+   *
+   * The emit is signature-gated, per `ARCHITECTURE.md` §11 — a courier idling under a
+   * panel edge produces one event, not one per frame.
+   */
+  private updateHudOcclusion(mission: ActiveMission | null): void {
+    this.hudIndicator.clear();
+
+    const tracked: Rect[] = [
+      this.worldToScreenRect(this.player.x, this.player.y, TRACKED_ENTITY_RADIUS),
+    ];
+    const marker = this.getObjectiveMarker(mission);
+
+    if (marker) {
+      tracked.push(this.worldToScreenRect(marker.point.x, marker.point.y, TRACKED_ENTITY_RADIUS));
+    }
+
+    // A small array scanned linearly: there are at most four panels, so this beats
+    // allocating a `Set` on every frame of the simulation loop.
+    const occludedIds: string[] = [];
+    for (const rect of tracked) {
+      for (const id of findOccludersFor(rect, this.hudOccluders)) {
+        if (!occludedIds.includes(id)) occludedIds.push(id);
+      }
+    }
+
+    // Sorted, so the payload is deterministic for a given set regardless of the order
+    // the panels happened to be discovered in.
+    occludedIds.sort();
+    const signature = computeOcclusionSignature(occludedIds);
+
+    if (signature !== this.lastOcclusionSignature) {
+      this.lastOcclusionSignature = signature;
+      EventBus.emitEvent('hud:occlusion-changed', { occludedPanelIds: occludedIds });
+    }
+
+    if (marker) this.drawObjectiveIndicator(marker);
+  }
+
+  /**
+   * Pins a chevron to the nearest safe-area edge in the direction of the objective.
+   *
+   * Distinct from `updateGuideArrow`, and both are needed. That one orbits the courier
+   * to answer "which way do I drive?" — useless when the crate is already on screen but
+   * behind a panel, because the answer is "it is right there", not a bearing. This one
+   * answers "where is the thing I cannot see?", which is the actual failure mode: the
+   * objective sitting in the top-left under the mission panel.
+   *
+   * Nothing is drawn while the objective is inside the safe area, since by then it is
+   * unobstructed and a marker would be pure noise.
+   */
+  private drawObjectiveIndicator(marker: { point: Point; color: number }): void {
+    // The viewport the occluders were measured against — the canvas's own game space,
+    // not the CSS pixel space the page sees.
+    const viewport: Rect = { x: 0, y: 0, width: GAME_WIDTH, height: GAME_HEIGHT };
+    const safeArea = computeSafeArea(viewport, this.hudOccluders);
+    const target = this.worldToScreenPoint(marker.point.x, marker.point.y);
+
+    if (pointInRect(target, safeArea)) return;
+
+    // Clamp against the boundary pulled in by the chevron's own reach, so the whole
+    // marker — tip included — lands in clear air instead of under the panel edge.
+    const anchor = clampToSafeArea(target, deflateRect(safeArea, INDICATOR_REACH));
+    this.drawChevron(anchor, indicatorAngle(anchor, target), marker.color);
+  }
+
+  /**
+   * Draws a chevron at `anchor` pointing along `angle`.
+   *
+   * Same silhouette as the guide arrow, so the two read as one visual vocabulary — but
+   * drawn in viewport space, against the safe-area border, rather than out in the city.
+   * The dark stroke is what keeps it legible over both the pale road grid and the
+   * near-black district floor.
+   */
+  private drawChevron(anchor: Point, angle: number, color: number): void {
+    const tip = 16;
+    const shoulder = 10;
+
+    this.hudIndicator.fillStyle(color, 0.95);
+    this.hudIndicator.beginPath();
+    this.hudIndicator.moveTo(anchor.x + Math.cos(angle) * tip, anchor.y + Math.sin(angle) * tip);
+    this.hudIndicator.lineTo(
+      anchor.x + Math.cos(angle + 2.4) * shoulder,
+      anchor.y + Math.sin(angle + 2.4) * shoulder
+    );
+    this.hudIndicator.lineTo(
+      anchor.x + Math.cos(angle - 2.4) * shoulder,
+      anchor.y + Math.sin(angle - 2.4) * shoulder
+    );
+    this.hudIndicator.closePath();
+    this.hudIndicator.fillPath();
+    this.hudIndicator.lineStyle(2, 0x08090d, 0.85);
+    this.hudIndicator.strokePath();
   }
 
   private clearMissionEntities(): void {

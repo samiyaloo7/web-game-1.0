@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
 import { GameScene, GameSceneOptions } from './scenes/GameScene';
+import { GAME_HEIGHT, GAME_WIDTH } from './viewport';
 
 /**
  * Factory function to construct Phaser GameConfig dynamically attached to a specific DOM container.
@@ -15,8 +16,8 @@ export function createGameConfig(
   return {
     type: Phaser.AUTO, // Automatically chooses WebGL, falls back to Canvas 2D
     parent: parentContainer,
-    width: 1280,
-    height: 720,
+    width: GAME_WIDTH,
+    height: GAME_HEIGHT,
     backgroundColor: '#0a0c14',
     scale: {
       mode: Phaser.Scale.FIT, // Scales proportionally to fit the parent container

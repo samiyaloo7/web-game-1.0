@@ -1,7 +1,9 @@
 'use client';
 
 import { useGameStore } from '@/stores/useGameStore';
+import { OCCLUDED_PANEL_CLASS, usePanelOccluded } from '@/hooks/useHudOcclusion';
 import { Coins, Zap, Trophy } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 /**
  * GameHudStats renders the career wallet and rank beside the session score.
@@ -21,11 +23,20 @@ export function GameHudStats() {
   const completed = useGameStore((s) => s.stats.completedCount);
   const failed = useGameStore((s) => s.stats.failedCount);
 
+  // Top-right panel: fades when a drop pad or crate drifts under it.
+  const isOccluded = usePanelOccluded('hud-stats');
+
   const progressPercent = Math.round(levelProgress * 100);
   const xpLabel = xpToNextLevel === 0 ? 'MAX RANK' : `${xpIntoLevel} / ${xpToNextLevel} XP`;
 
   return (
-    <div className="flex items-center gap-2 sm:gap-4 bg-cyber-dark/85 backdrop-blur-md border border-cyber-border rounded-lg px-3 sm:px-4 py-2 font-mono text-xs shadow-lg">
+    <div
+      data-hud-panel="hud-stats"
+      className={cn(
+        'flex items-center gap-2 sm:gap-4 bg-cyber-dark/85 backdrop-blur-md border border-cyber-border rounded-lg px-3 sm:px-4 py-2 font-mono text-xs shadow-lg transition-opacity duration-300',
+        isOccluded && OCCLUDED_PANEL_CLASS
+      )}
+    >
       {/* Career wallet */}
       <div className="flex items-center gap-1.5">
         <Coins className="w-4 h-4 text-neon-amber" />
