@@ -21,7 +21,12 @@ export const HUD_PANEL_ATTRIBUTE = 'data-hud-panel';
  * A union rather than `string` so a typo in either the markup or a consumer is a
  * compile error, instead of a panel that silently never fades.
  */
-export type HudPanelId = 'hud-mission' | 'hud-vitals' | 'hud-stats' | 'hud-controls';
+export type HudPanelId =
+  | 'hud-mission'
+  | 'hud-vitals'
+  | 'hud-stats'
+  | 'hud-controls'
+  | 'hud-challenge';
 
 /**
  * Opacity a panel drops to while it is covering the world.

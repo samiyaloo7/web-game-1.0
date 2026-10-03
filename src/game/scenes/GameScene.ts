@@ -17,9 +17,11 @@ import { createRunSeed, generateCity, validateCity } from '../systems/CityGenera
 import { planDroneSpawns } from '../systems/DroneSpawner';
 import { SeededRandom } from '../systems/SeededRandom';
 import { PlayerProgression } from '../systems/PlayerProgression';
+import { ChallengeTracker } from '../systems/ChallengeTracker';
 import { DEFAULT_BASE_STATS } from '../types/progression';
 import { computeTimeRatio } from '../../lib/scoring/delivery';
 import type { ProgressionState } from '../types/progression';
+import type { DailyChallenge } from '../types/challenge';
 import {
   clampToSafeArea,
   computeOcclusionSignature,
@@ -94,6 +96,22 @@ export class GameScene extends Phaser.Scene {
    */
   private progression!: PlayerProgression;
 
+  /**
+   * The day's challenge attempt. Another pure system: it owns the window, progress
+   * and completion, and reports outward through its own callback. The scene feeds it
+   * finished deliveries and per-frame delta — it never learns what a "player" is.
+   */
+  private challengeTracker!: ChallengeTracker;
+
+  /**
+   * Id of the challenge whose completion has already been announced.
+   *
+   * `challenge:completed` must fire exactly once per day: a second emission would
+   * make React report (and pay) the reward twice. Seeded from the server's own
+   * `completed` flag on load, so a resumed session does not re-announce.
+   */
+  private announcedChallengeId: string | null = null;
+
   // Combat. The vitals system owns the numbers; the director owns the drones.
   private vitals!: PlayerVitals;
   private droneDirector!: DroneDirector;
@@ -154,6 +172,45 @@ export class GameScene extends Phaser.Scene {
   };
 
   /**
+   * Installs the day's challenge decided by the SERVER.
+   *
+   * The browser never computes "what day is it" for this; it relays the challenge
+   * the route derived from its own clock (see `DAILY_CHALLENGES.md`). The tracker
+   * resets only when the id actually changes, so a mid-day refetch is harmless.
+   */
+  private handleLoadDailyChallengeCommand = (data: {
+    challenge: DailyChallenge | null;
+    progress: { progress: number; completed: boolean; rewardGranted: boolean } | null;
+  }): void => {
+    this.challengeTracker.setChallenge(data.challenge);
+
+    if (data.progress) {
+      this.challengeTracker.hydrate(data.progress);
+    }
+
+    // A challenge the server already considers complete must not be announced
+    // again, or its reward would be paid twice.
+    this.announcedChallengeId = data.progress?.completed ? (data.challenge?.id ?? null) : null;
+  };
+
+  /**
+   * Pays a confirmed challenge reward into the career.
+   *
+   * `recordDelivery` is the generic atomic credit+XP grant (one notify per call);
+   * a challenge payout is the same transaction as a delivery payout, so it reuses
+   * it rather than duplicating the wallet/rank arithmetic. Marking the reward
+   * granted is what makes the HUD show "reward paid" and stops a re-announce.
+   */
+  private handleGrantChallengeRewardCommand = (data: {
+    challengeId: string;
+    credits: number;
+    xp: number;
+  }): void => {
+    this.challengeTracker.markRewardGranted();
+    this.progression.recordDelivery(data.credits, data.xp);
+  };
+
+  /**
    * Accepts freshly measured HUD panel rects from the DOM layer.
    *
    * Deliberately *not* sanitised beyond the geometry itself: these come from our own
@@ -189,6 +246,12 @@ export class GameScene extends Phaser.Scene {
       onChange: (snapshot) => EventBus.emitEvent('progression:updated', snapshot),
     });
 
+    // The daily challenge runs on the same terms: game state with an injected
+    // callback, so its rules stay testable without the EventBus.
+    this.challengeTracker = new ChallengeTracker({
+      onChange: (snapshot) => EventBus.emitEvent('challenge:progress', snapshot),
+    });
+
     // Build the city first: it decides world bounds, the player spawn point and
     // the collision geometry the rest of the scene depends on.
     this.createCity(this.initialSeed ?? createRunSeed());
@@ -221,6 +284,8 @@ export class GameScene extends Phaser.Scene {
     EventBus.onCommand('cmd:regenerate-city', this.handleRegenerateCityCommand);
     EventBus.onCommand('cmd:restart-run', this.handleRestartRunCommand);
     EventBus.onCommand('cmd:load-progression', this.handleLoadProgressionCommand);
+    EventBus.onCommand('cmd:load-daily-challenge', this.handleLoadDailyChallengeCommand);
+    EventBus.onCommand('cmd:grant-challenge-reward', this.handleGrantChallengeRewardCommand);
     EventBus.onCommand('cmd:sync-hud-occluders', this.handleSyncHudOccludersCommand);
 
     // Clean up event listeners on scene shutdown
@@ -236,6 +301,9 @@ export class GameScene extends Phaser.Scene {
     this.deliveryManager.emitStatsUpdate();
     // Seed the HUD with the starting profile before the first delivery pays out.
     EventBus.emitEvent('progression:updated', this.progression.getSnapshot());
+    // ...and with the neutral challenge state, so the panel renders before the
+    // server has answered with today's objective.
+    EventBus.emitEvent('challenge:progress', this.challengeTracker.getSnapshot());
 
     // Start first delivery
     this.startNewDeliveryRun();
@@ -401,6 +469,8 @@ export class GameScene extends Phaser.Scene {
     EventBus.offCommand('cmd:regenerate-city', this.handleRegenerateCityCommand);
     EventBus.offCommand('cmd:restart-run', this.handleRestartRunCommand);
     EventBus.offCommand('cmd:load-progression', this.handleLoadProgressionCommand);
+    EventBus.offCommand('cmd:load-daily-challenge', this.handleLoadDailyChallengeCommand);
+    EventBus.offCommand('cmd:grant-challenge-reward', this.handleGrantChallengeRewardCommand);
     EventBus.offCommand('cmd:sync-hud-occluders', this.handleSyncHudOccludersCommand);
   }
 
@@ -442,6 +512,11 @@ export class GameScene extends Phaser.Scene {
     this.runOver = false;
     this.runElapsedSeconds = 0;
     this.lastVitalsSignature = '';
+
+    // A new run is a new timed attempt: the previous window (if any) is discarded
+    // so the courier is never punished for dying mid-attempt. A completed
+    // challenge stays completed — the tracker ignores this call.
+    this.challengeTracker.beginAttempt();
 
     this.emitVitals();
     EventBus.emitEvent('game:run-state-changed', {
@@ -550,6 +625,9 @@ export class GameScene extends Phaser.Scene {
 
     this.runElapsedSeconds += deltaSeconds;
     this.vitals.update(deltaSeconds);
+    // The challenge window only advances while the sim is live — pausing (which
+    // stops `update` entirely) pauses the attempt, which is what a pause is for.
+    this.challengeTracker.update(deltaSeconds);
 
     const input = this.inputManager.getMovementInput();
     this.player.updatePlayer(delta, input);
@@ -712,6 +790,35 @@ export class GameScene extends Phaser.Scene {
     );
 
     this.nextMissionCooldownTimer = 3.5;
+
+    // Feed the daily challenge. `->` the tracker decides whether this run counts
+    // (metric match, window still open, challenge not already complete) and emits
+    // `challenge:progress` through its own callback.
+    if (mission) {
+      const timeRatio = computeTimeRatio(mission.remainingTimeSeconds, mission.timeLimitSeconds);
+
+      this.challengeTracker.recordDelivery({ credits, xp, timeRatio });
+      const challenge = this.challengeTracker.getSnapshot();
+
+      // Announce completion exactly once. React owns the network call and the
+      // reward grant (useDailyChallenge → POST /api/challenges), so Phaser never
+      // imports Supabase or `fetch` — the same split as `delivery:recorded`.
+      if (
+        challenge.completed &&
+        challenge.challengeId !== null &&
+        challenge.challengeId !== this.announcedChallengeId
+      ) {
+        this.announcedChallengeId = challenge.challengeId;
+        EventBus.emitEvent('challenge:completed', {
+          challengeId: challenge.challengeId,
+          dayIndex: challenge.dayIndex ?? 0,
+          progress: challenge.progress,
+          target: challenge.target,
+          rewardCredits: challenge.rewardCredits,
+          rewardXp: challenge.rewardXp,
+        });
+      }
+    }
 
     // Publish the run for the leaderboard. Note what is sent: a package id and a
     // time ratio, NOT the payout. The server prices the delivery from its own

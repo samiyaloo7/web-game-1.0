@@ -28,6 +28,17 @@ function hashStringToSeed(input: string): number {
   return hash >>> 0;
 }
 
+/**
+ * Public form of the string→seed hash.
+ *
+ * Exposed so a caller can derive a *labelled* seed without constructing a
+ * generator first — this is how `DailyChallenge` turns a date into a numeric seed
+ * that can be logged, compared and stored alongside the challenge.
+ */
+export function hashSeed(input: string): number {
+  return hashStringToSeed(input);
+}
+
 /** Accepts numbers or strings so a seed can come from a URL, a form, or code. */
 function normalizeSeed(seed: number | string): number {
   if (typeof seed === 'number') {

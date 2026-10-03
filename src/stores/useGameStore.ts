@@ -2,7 +2,20 @@ import { create } from 'zustand';
 import { GameToUiEvents } from '@/game/EventBus';
 import { xpToAdvance } from '@/game/systems/ProgressionMath';
 import { DEFAULT_BASE_STATS, STARTING_MONEY } from '@/game/types/progression';
+import { EMPTY_CHALLENGE_SNAPSHOT } from '@/game/types/challenge';
+import type { ChallengeProgressSnapshot } from '@/game/types/challenge';
 import type { ProgressionSnapshot } from '@/game/types/progression';
+
+/**
+ * How the daily challenge is getting on with the server.
+ *
+ *  - `idle`     — nothing to report (no challenge, or still playing an attempt)
+ *  - `syncing`  — a completion is being recorded
+ *  - `granted`  — the server confirmed it and the reward is in the wallet
+ *  - `offline`  — local-only session (no Supabase), reward paid locally
+ *  - `error`    — the uplink failed; the HUD offers a retry-by-refresh
+ */
+export type ChallengeSyncStatus = 'idle' | 'syncing' | 'granted' | 'offline' | 'error';
 
 export interface HudMissionState {
   status: 'unassigned' | 'pickup_available' | 'in_transit' | 'success' | 'failed';
@@ -108,6 +121,21 @@ interface GameStoreState {
    */
   occludedPanelIds: string[];
 
+  /**
+   * Live daily-challenge mirror.
+   *
+   * UI state, like `mission` and `progression`: written only by the game over
+   * `challenge:progress`, and already render-gated on the game side (the tracker
+   * quantizes to whole seconds), so writing it verbatim cannot cause per-frame
+   * renders. The authoritative challenge always lives in `ChallengeTracker`.
+   */
+  challenge: ChallengeProgressSnapshot;
+  /**
+   * How the challenge is getting on with the server, surfaced by the HUD so a
+   * courier can tell "reward paid" from "could not reach the uplink".
+   */
+  challengeSyncStatus: ChallengeSyncStatus;
+
   // Actions
   setMission: (mission: GameToUiEvents['mission:updated']) => void;
   setTimerTick: (remainingTimeSeconds: number) => void;
@@ -122,6 +150,8 @@ interface GameStoreState {
   setSyncStatus: (status: GameStoreState['syncStatus']) => void;
   setIsNewPersonalBest: (isNewBest: boolean) => void;
   setOccludedPanelIds: (occludedPanelIds: string[]) => void;
+  setChallenge: (challenge: GameToUiEvents['challenge:progress']) => void;
+  setChallengeSyncStatus: (status: ChallengeSyncStatus) => void;
   resetSession: () => void;
 }
 
@@ -206,6 +236,8 @@ export const useGameStore = create<GameStoreState>((set) => ({
   syncStatus: 'idle',
   isNewPersonalBest: false,
   occludedPanelIds: [],
+  challenge: EMPTY_CHALLENGE_SNAPSHOT,
+  challengeSyncStatus: 'idle',
 
   setMission: (mission) =>
     set({
@@ -251,6 +283,10 @@ export const useGameStore = create<GameStoreState>((set) => ({
   setIsNewPersonalBest: (isNewPersonalBest) => set({ isNewPersonalBest }),
 
   setOccludedPanelIds: (occludedPanelIds) => set({ occludedPanelIds }),
+
+  setChallenge: (challenge) => set({ challenge }),
+
+  setChallengeSyncStatus: (challengeSyncStatus) => set({ challengeSyncStatus }),
 
   /**
    * Clears the *session* view only. `progression` is deliberately untouched: the career

@@ -256,3 +256,118 @@ describe('20260928120000 rebuilds the Step 9 view with DROP + CREATE', () => {
     expect(grant, 'no `grant select on public.leaderboard` — DROP discards the old grants, leaving the board unreadable.').toBeGreaterThan(create);
   });
 });
+
+/**
+ * THE DAILY CHALLENGE WRITE PATH
+ * ==============================
+ *
+ * `20260929100000_daily_challenges.sql` is the only place a challenge result can
+ * be written, and it is applied by hand. The structural guard above proves the
+ * file parses; these checks prove the *policy* the file is supposed to encode is
+ * actually in it — the parts that would still "work" if they were wrong, and so
+ * would never be noticed:
+ *
+ *  - an INSERT/UPDATE grant would let a client write its own `claimed_at`;
+ *  - a missing `revoke execute … from anon` would expose the definer function;
+ *  - losing the `coalesce(dcp.claimed_at, …)` would let a retry re-stamp the
+ *    claim, and `newly_claimed` would then report a second payout;
+ *  - dropping the `greatest(0, least(…))` clamp would let the client-supplied
+ *    `p_progress` exceed the objective's own target.
+ */
+describe('20260929100000 locks down the daily challenge write path', () => {
+  const path = join(
+    process.cwd(),
+    'supabase',
+    'migrations',
+    '20260929100000_daily_challenges.sql'
+  );
+  const sql = scrub(readFileSync(path, 'utf8'));
+
+  /** The `record_challenge_progress` body, so its clauses can be checked directly. */
+  const body = (() => {
+    const parts = sql.split('$$');
+    const index = parts.findIndex((part) =>
+      /create\s+or\s+replace\s+function\s+public\.record_challenge_progress/i.test(part)
+    );
+    // The header is an even segment, so its body is the next one.
+    return index >= 0 ? parts[index + 1] ?? '' : '';
+  })();
+
+  it('defines the progress table keyed by (profile_id, challenge_id)', () => {
+    expect(sql).toMatch(
+      /create\s+table\s+if\s+not\s+exists\s+public\.daily_challenge_progress/i
+    );
+    expect(
+      sql,
+      'the composite primary key is what makes a retried POST idempotent — without it a courier could accumulate several results for one day.'
+    ).toMatch(/primary\s+key\s*\(\s*profile_id\s*,\s*challenge_id\s*\)/i);
+  });
+
+  it('enables RLS and allows only own-row reads', () => {
+    expect(sql).toMatch(
+      /alter\s+table\s+public\.daily_challenge_progress\s+enable\s+row\s+level\s+security/i
+    );
+    expect(sql).toMatch(
+      /create\s+policy\s+daily_challenge_progress_select_own[\s\S]{0,200}?using\s*\(\s*profile_id\s*=\s*\(\s*select\s+auth\.uid\(\)\s*\)\s*\)/i
+    );
+  });
+
+  it('grants no direct write to clients', () => {
+    const grant = sql.match(
+      /grant\s+([^;]*?)\s+on\s+public\.daily_challenge_progress\s+to\s+(anon|authenticated)/gi
+    ) ?? [];
+
+    for (const statement of grant) {
+      expect(
+        statement.toUpperCase().includes('SELECT'),
+        `\`${statement.trim()}\` — the table must be read-only for clients; \`record_challenge_progress\` is the single write path.`
+      ).toBe(true);
+      expect(
+        /\b(INSERT|UPDATE|DELETE)\b/i.test(statement),
+        `\`${statement.trim()}\` grants a write privilege, which would let a client stamp its own claimed_at.`
+      ).toBe(false);
+    }
+  });
+
+  it('keeps the write function a search_path-less SECURITY DEFINER', () => {
+    expect(body, `no \`record_challenge_progress\` body found in ${path}.`).not.toBe('');
+    expect(sql).toMatch(
+      /security\s+definer[\s\S]{0,200}?set\s+search_path\s*=\s*''/i
+    );
+  });
+
+  it('revokes the default PUBLIC grant and opens it to authenticated only', () => {
+    expect(sql).toMatch(
+      /revoke\s+execute\s+on\s+function\s+public\.record_challenge_progress[\s\S]{0,400}?from\s+public\s*,\s*anon/i
+    );
+    expect(sql).toMatch(
+      /grant\s+execute\s+on\s+function\s+public\.record_challenge_progress[\s\S]{0,400}?to\s+authenticated/i
+    );
+  });
+
+  it('clamps the client-supplied progress into the objective range', () => {
+    expect(
+      body,
+      'the only browser-supplied number must be clamped with greatest(0, least(p_progress, p_target)).'
+    ).toMatch(/greatest\s*\(\s*0\s*,\s*least\s*\(\s*coalesce\s*\(\s*p_progress/i);
+  });
+
+  it('makes the claim transition happen exactly once', () => {
+    expect(body, 'the upsert must keep the FIRST claim — `coalesce(dcp.claimed_at, excluded.claimed_at)`.').toMatch(
+      /claimed_at\s*=\s*coalesce\s*\(\s*dcp\.claimed_at\s*,\s*excluded\.claimed_at\s*\)/i
+    );
+    expect(body, 'the upsert must keep the FIRST completion stamp.').toMatch(
+      /completed_at\s*=\s*coalesce\s*\(\s*dcp\.completed_at\s*,\s*excluded\.completed_at\s*\)/i
+    );
+    expect(
+      body,
+      '`newly_claimed` must be derived from the pre-call state read into `v_previous_claimed`; otherwise every retry reports a payout.'
+    ).toMatch(/dcp\.claimed_at\s+is\s+not\s+null\s+and\s+v_previous_claimed\s+is\s+null/i);
+  });
+
+  it('reuses the shared updated_at trigger', () => {
+    expect(sql).toMatch(
+      /create\s+trigger\s+daily_challenge_progress_set_updated_at[\s\S]{0,200}?execute\s+function\s+public\.set_updated_at\(\)/i
+    );
+  });
+});

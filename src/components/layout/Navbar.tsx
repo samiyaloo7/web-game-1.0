@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Zap, Gamepad2, Trophy, User, LogIn, LogOut } from "lucide-react";
+import { Zap, Gamepad2, Trophy, User, LogIn, LogOut, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -14,6 +14,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Dispatch (Play)", href: "/game", icon: Gamepad2 },
+  { label: "Daily Challenge", href: "/challenges", icon: CalendarClock },
   { label: "Leaderboard", href: "/leaderboard", icon: Trophy },
   { label: "Courier ID", href: "/profile", icon: User },
 ];

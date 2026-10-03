@@ -20,6 +20,7 @@ export function useGameBridge() {
   const setIsPaused = useGameStore((s) => s.setIsPaused);
   const setIsEngineReady = useGameStore((s) => s.setIsEngineReady);
   const setOccludedPanelIds = useGameStore((s) => s.setOccludedPanelIds);
+  const setChallenge = useGameStore((s) => s.setChallenge);
 
   useEffect(() => {
     const handleMission = (data: GameToUiEvents['mission:updated']) => {
@@ -77,6 +78,15 @@ export function useGameBridge() {
       setIsEngineReady(true);
     };
 
+    /**
+     * Daily-challenge state. Like the occlusion set, the game side already gates
+     * this (the tracker notifies on transitions and on the visible second only), so
+     * it can be written straight into React state.
+     */
+    const handleChallenge = (data: GameToUiEvents['challenge:progress']) => {
+      setChallenge(data);
+    };
+
     const handleDestroyed = () => {
       setIsEngineReady(false);
       // With the simulation gone there is nothing left to be covering, so the panels
@@ -96,6 +106,7 @@ export function useGameBridge() {
     EventBus.onEvent('hud:occlusion-changed', handleOcclusion);
     EventBus.onEvent('game:ready', handleReady);
     EventBus.onEvent('game:destroyed', handleDestroyed);
+    EventBus.onEvent('challenge:progress', handleChallenge);
 
     return () => {
       EventBus.offEvent('mission:updated', handleMission);
@@ -110,8 +121,9 @@ export function useGameBridge() {
       EventBus.offEvent('hud:occlusion-changed', handleOcclusion);
       EventBus.offEvent('game:ready', handleReady);
       EventBus.offEvent('game:destroyed', handleDestroyed);
+      EventBus.offEvent('challenge:progress', handleChallenge);
     };
-  }, [setMission, setTimerTick, setStats, setProgression, setCity, setVitals, setThreat, setRunState, setIsPaused, setIsEngineReady, setOccludedPanelIds]);
+  }, [setMission, setTimerTick, setStats, setProgression, setCity, setVitals, setThreat, setRunState, setIsPaused, setIsEngineReady, setOccludedPanelIds, setChallenge]);
 
   // Command dispatch helpers (React -> Phaser)
   const togglePause = useCallback(() => {

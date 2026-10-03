@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { ProgressionSnapshot, ProgressionState } from './types/progression';
+import type { ChallengeProgressSnapshot, DailyChallenge } from './types/challenge';
 import type { Occluder } from './systems/HudOcclusion';
 
 
@@ -117,6 +118,31 @@ export interface GameToUiEvents {
     occludedPanelIds: string[];
   };
   /**
+   * Live daily-challenge state.
+   *
+   * Fired on real changes only — the tracker quantizes its window countdown to
+   * whole seconds, so a 60 FPS attempt emits at most one event per second rather
+   * than sixty. Carries the fully rendered challenge, so React never re-derives
+   * the objective.
+   */
+  'challenge:progress': ChallengeProgressSnapshot;
+  /**
+   * Fired once when the objective is met, so React can report the completion to
+   * the server and pay the reward exactly once.
+   *
+   * The payload carries the *numbers the game observed*; the amount actually paid
+   * is the server's (`record_challenge_progress` re-derives it from the day's
+   * generated challenge), which is why Phaser emits a fact and not a payout.
+   */
+  'challenge:completed': {
+    challengeId: string;
+    dayIndex: number;
+    progress: number;
+    target: number;
+    rewardCredits: number;
+    rewardXp: number;
+  };
+  /**
    * Engine lifecycle notifications.
    *
    * `game:ready` is emitted by the scene once its command listeners are registered and
@@ -163,6 +189,39 @@ export interface UiToGameCommands {
    * to reason about CSS transforms or the canvas letterbox.
    */
   'cmd:sync-hud-occluders': { occluders: Occluder[] };
+  /**
+   * Hydrate (or replace) the day's daily challenge.
+   *
+   * Sent by `useDailyChallenge` after the *server* has decided which day it is —
+   * never from the browser's own clock. The tracker treats a different id as a new
+   * day and resets its attempt; the same id is a no-op so a refetch cannot wipe
+   * live progress.
+   *
+   * `progress` resumes the courier's own row (how far they already got, and
+   * whether the reward has already been paid) so a reload neither loses progress
+   * nor pays twice.
+   */
+  'cmd:load-daily-challenge': {
+    challenge: DailyChallenge | null;
+    progress: {
+      progress: number;
+      completed: boolean;
+      rewardGranted: boolean;
+    } | null;
+  };
+  /**
+   * Pay a confirmed challenge reward into the local career.
+   *
+   * Sent only after the server has recorded the completion (or, in a local-only
+   * session with no Supabase, immediately by the fallback path). The scene applies
+   * it through `PlayerProgression`, so the wallet/rank update and the debounced
+   * save behave exactly as they do for a delivery payout.
+   */
+  'cmd:grant-challenge-reward': {
+    challengeId: string;
+    credits: number;
+    xp: number;
+  };
 }
 
 export type AllGameEvents = GameToUiEvents & UiToGameCommands;

@@ -1,3 +1,4 @@
+import { CHALLENGE_MAX_PROGRESS } from '@/game/data/challengeData';
 import type { ScoreStatus } from './supabase/database';
 
 /**
@@ -306,3 +307,68 @@ export function validateSignUpInput(input: unknown): ValidationResult<SignUpInpu
     value: { ...credentials.value, username: username.value },
   };
 }
+
+// ---------------------------------------------------------------------------
+// Daily challenge progress
+//
+// WHY THE BROWSER SENDS A DAY INDEX AT ALL
+// ----------------------------------------
+// The server derives the live challenge from its OWN clock, so the browser has no
+// say in which objective is being played. That leaves one failure mode a stateless
+// API cannot detect: the courier starts an attempt at 23:59:58 UTC and the POST
+// lands at 00:00:01 — the next day. Applying that progress to tomorrow's challenge
+// would complete an objective the courier never attempted.
+//
+// The submitted `dayIndex` is therefore used ONLY as an equality check against the
+// server's own day. It is never used to *derive* anything: a client that lies
+// about the date is rejected (409) rather than believed. The progress counter is
+// clamped here for a clean 400, and clamped again in SQL where it is stored.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanity ceiling for a submitted day index. It only has to be larger than any
+ * real day; its job is to keep an absurd value out of the database's integer range
+ * and out of the logs, not to be an anti-cheat measure.
+ */
+export const MAX_CHALLENGE_DAY_INDEX = 1_000_000;
+
+/** What the browser is allowed to report. No reward, no target, no owner id. */
+export interface ChallengeProgressSubmission {
+  /** The day the client believes it is playing, for a staleness check only. */
+  dayIndex: number;
+  /** How far the attempt got. Clamped to `0..CHALLENGE_MAX_PROGRESS`. */
+  progress: number;
+}
+
+export function validateChallengeProgressSubmission(
+  input: unknown
+): ValidationResult<ChallengeProgressSubmission> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return { ok: false, error: 'Challenge progress must be an object' };
+  }
+
+  const body = input as Record<string, unknown>;
+
+  if (
+    typeof body.dayIndex !== 'number' ||
+    !Number.isInteger(body.dayIndex) ||
+    body.dayIndex < 0 ||
+    body.dayIndex > MAX_CHALLENGE_DAY_INDEX
+  ) {
+    return { ok: false, error: 'dayIndex must be a non-negative integer' };
+  }
+
+  if (typeof body.progress !== 'number' || !Number.isFinite(body.progress)) {
+    return { ok: false, error: 'progress must be a number' };
+  }
+
+  // Floor rather than reject: a client reporting 2.4 deliveries is a rounding
+  // artefact, not an attack. The ceiling is the one hard bound.
+  const progress = Math.floor(body.progress);
+  if (progress < 0 || progress > CHALLENGE_MAX_PROGRESS) {
+    return { ok: false, error: `progress must be within 0..${CHALLENGE_MAX_PROGRESS}` };
+  }
+
+  return { ok: true, value: { dayIndex: body.dayIndex, progress } };
+}
+

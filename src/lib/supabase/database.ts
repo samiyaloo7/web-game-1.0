@@ -122,6 +122,59 @@ export interface Database {
           },
         ];
       };
+      daily_challenge_progress: {
+        Row: {
+          profile_id: string;
+          /** `dc_YYYY-MM-DD`, derived from the server's UTC day index. */
+          challenge_id: string;
+          /** Whole days since the challenge epoch — see `DailyChallenge.ts`. */
+          day_index: number;
+          metric: 'deliveries' | 'credits' | 'xp';
+          target: number;
+          window_seconds: number;
+          title: string;
+          description: string;
+          reward_credits: number;
+          reward_xp: number;
+          progress: number;
+          /** Stamped by the database on first completion, never by the browser. */
+          completed_at: string | null;
+          /** Stamped by the database when the reward was granted. */
+          claimed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          profile_id: string;
+          challenge_id: string;
+          day_index: number;
+          metric: 'deliveries' | 'credits' | 'xp';
+          target: number;
+          window_seconds?: number;
+          title?: string;
+          description?: string;
+          reward_credits?: number;
+          reward_xp?: number;
+          progress?: number;
+          completed_at?: string | null;
+          claimed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        /**
+         * No client write path exists (RLS has no write policy and no client
+         * grant); writes go through `record_challenge_progress`.
+         */
+        Update: Record<string, never>;
+        Relationships: [
+          {
+            foreignKeyName: 'daily_challenge_progress_profile_id_fkey';
+            columns: ['profile_id'];
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Views: {
       leaderboard: {
@@ -183,6 +236,39 @@ export interface Database {
       recent_delivery_count: {
         Args: { p_within_seconds?: number; p_limit?: number };
         Returns: number;
+      };
+      /**
+       * The single write path for a daily challenge.
+       *
+       * Note what is absent from `Args`: any owner id. The function reads
+       * `auth.uid()` and clamps `p_progress` into `0..p_target`, and the reward it
+       * stamps is the one the route passed from the day's generated challenge.
+       */
+      record_challenge_progress: {
+        Args: {
+          p_challenge_id: string;
+          p_day_index: number;
+          p_metric: string;
+          p_target: number;
+          p_window_seconds: number;
+          p_title: string;
+          p_description: string;
+          p_reward_credits: number;
+          p_reward_xp: number;
+          p_progress: number;
+        };
+        Returns: {
+          challenge_id: string;
+          day_index: number;
+          progress: number;
+          target: number;
+          completed: boolean;
+          claimed: boolean;
+          /** True only on the call that transitioned the row to claimed. */
+          newly_claimed: boolean;
+          reward_credits: number;
+          reward_xp: number;
+        }[];
       };
     };
     Enums: Record<string, never>;

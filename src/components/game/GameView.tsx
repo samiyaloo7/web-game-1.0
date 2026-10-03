@@ -6,12 +6,14 @@ import { GameHudStats } from './GameHudStats';
 import { GameHudMission } from './GameHudMission';
 import { GameHudControls } from './GameHudControls';
 import { GameHudVitals } from './GameHudVitals';
+import { GameHudChallenge } from './GameHudChallenge';
 import { GameOverOverlay } from './GameOverOverlay';
 import { PauseOverlay } from './PauseOverlay';
 import { useGameBridge } from '@/hooks/useGameBridge';
 import { useHudOcclusion } from '@/hooks/useHudOcclusion';
 import { useProgressionSync } from '@/hooks/useProgressionSync';
 import { useScoreReporting } from '@/hooks/useScoreReporting';
+import { useDailyChallenge } from '@/hooks/useDailyChallenge';
 
 /**
  * Reads an optional `?seed=` query param so a generated district can be shared or
@@ -53,6 +55,10 @@ export function GameView() {
 
   // Report finished deliveries to the leaderboard. Also a no-op for guests.
   useScoreReporting();
+
+  // Ask the server which challenge today is, push it into the simulation, and
+  // record the outcome. The clock authority is the server; see the hook.
+  useDailyChallenge();
 
   useEffect(() => {
     let isCancelled = false;
@@ -112,11 +118,17 @@ export function GameView() {
         </div>
       </div>
 
-      {/* 3. Pause / Game Over Overlays (z-30) */}
+      {/* 3. Daily challenge panel (z-20). Bottom-left, clear of the top HUD stack,
+             and narrow enough not to cover the drop pad on a laptop viewport. */}
+      <div className="absolute bottom-3 left-3 z-20 w-[calc(100%-1.5rem)] sm:w-80 pointer-events-auto">
+        <GameHudChallenge />
+      </div>
+
+      {/* 4. Pause / Game Over Overlays (z-30) */}
       <PauseOverlay />
       <GameOverOverlay />
 
-      {/* 4. Engine Loading Fallback */}
+      {/* 5. Engine Loading Fallback */}
       {!isReady && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-cyber-black/90 text-neon-cyan font-mono text-sm gap-3 z-40">
           <div className="w-6 h-6 border-2 border-neon-cyan border-t-transparent rounded-full animate-spin" />
