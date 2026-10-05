@@ -12,6 +12,11 @@ import type { CityMap } from '../types/city';
 import type { DroneTuning } from '../types/enemy';
 import { DEFAULT_DRONE_TUNING } from '../types/enemy';
 import { EventBus } from '../EventBus';
+import { GameAudio } from '../audio/GameAudio';
+import { getBrowserStorage } from '../audio/AudioSettings';
+import type { AudioSettings } from '../audio/AudioSettings';
+import type { SfxName } from '../audio/GameAudio';
+import { EffectsDirector } from '../systems/EffectsDirector';
 import { CityRenderer } from '../renderers/CityRenderer';
 import { createRunSeed, generateCity, validateCity } from '../systems/CityGenerator';
 import { planDroneSpawns } from '../systems/DroneSpawner';
@@ -124,6 +129,24 @@ export class GameScene extends Phaser.Scene {
   private lastVitalsSignature: string = '';
 
   /**
+   * Sound engine for this boot.
+   *
+   * Constructed in `create()` and destroyed on SHUTDOWN: the scene is the only
+   * thing that owns the AudioContext, so a teardown can never leave a context (or
+   * a music timer) running behind an unmounted game.
+   */
+  private audio!: GameAudio;
+
+  /**
+   * Particles, shockwaves, floating payout text and camera shake — the visual
+   * half of the same polish pass, pooled for the same reason.
+   */
+  private effects!: EffectsDirector;
+
+  /** Pending "hide the banner" timer, cancelled whenever a newer banner replaces it. */
+  private bannerHideTimer: Phaser.Time.TimerEvent | null = null;
+
+  /**
    * Measured HUD panel rects, in game pixels, published by React over
    * `cmd:sync-hud-occluders` (see `useHudOcclusion`).
    *
@@ -226,6 +249,26 @@ export class GameScene extends Phaser.Scene {
     this.lastOcclusionSignature = '';
   };
 
+  /** Applies the HUD's volume/mute settings straight to the live gain nodes. */
+  private handleSetAudioSettingsCommand = (data: AudioSettings): void => {
+    this.audio.setSettings(data);
+  };
+
+  /**
+   * A user gesture reached the game, so the AudioContext may attempt to start.
+   *
+   * The engine does the talking: it emits `audio:state-changed` only if the
+   * browser actually allowed it, which is what drives the HUD's hint.
+   */
+  private handleUnlockAudioCommand = (): void => {
+    this.audio.unlock();
+  };
+
+  /** One-shots triggered from React (interface ticks on HUD buttons). */
+  private handlePlaySfxCommand = (data: { name: SfxName }): void => {
+    this.audio.play(data.name);
+  };
+
   constructor(options: GameSceneOptions = {}) {
     super({ key: 'GameScene' });
     this.initialSeed = options.seed;
@@ -238,6 +281,15 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.inputManager = new InputManager(this);
+
+    // Scene-level services, built before any command can arrive: the audio engine
+    // (one AudioContext, released on shutdown) and the pooled particle/shake
+    // director. Both are owned by the scene, so nothing outlives it.
+    this.audio = new GameAudio({
+      storage: getBrowserStorage(),
+      onStateChange: (state) => EventBus.emitEvent('audio:state-changed', state),
+    });
+    this.effects = new EffectsDirector(this);
 
     // The career profile lives outside the run: it survives restarts and district jumps,
     // and pushes its own snapshots outward through the injected callback (never through
@@ -287,9 +339,17 @@ export class GameScene extends Phaser.Scene {
     EventBus.onCommand('cmd:load-daily-challenge', this.handleLoadDailyChallengeCommand);
     EventBus.onCommand('cmd:grant-challenge-reward', this.handleGrantChallengeRewardCommand);
     EventBus.onCommand('cmd:sync-hud-occluders', this.handleSyncHudOccludersCommand);
+    EventBus.onCommand('cmd:set-audio-settings', this.handleSetAudioSettingsCommand);
+    EventBus.onCommand('cmd:unlock-audio', this.handleUnlockAudioCommand);
+    EventBus.onCommand('cmd:play-sfx', this.handlePlaySfxCommand);
 
     // Clean up event listeners on scene shutdown
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      // Release the audio device and the pooled effects *before* announcing the
+      // teardown: `GameAudio.destroy()` emits a final `audio:state-changed`, and
+      // React's listener must still be alive to receive it.
+      this.audio.destroy();
+      this.effects.destroy();
       this.teardownCommandListeners();
       // Notify React that the simulation engine has torn down so the HUD
       // can reset its engine-ready flag instead of showing stale telemetry.
@@ -415,7 +475,9 @@ export class GameScene extends Phaser.Scene {
       other.registerContactDamage();
     }
 
-    this.cameras.main.shake(140, 0.006);
+    this.effects.shake(140, 0.006);
+    this.effects.damageBurst(this.player.x, this.player.y);
+    this.audio.play('damage');
     this.emitVitals();
 
     if (result.isDead) {
@@ -445,7 +507,7 @@ export class GameScene extends Phaser.Scene {
       `New district grid generated from seed ${this.cityMap.seedLabel}`,
       0x00c8ff
     );
-    this.time.delayedCall(2500, () => this.hideBanner());
+    this.scheduleBannerHide(2500);
   }
 
   private emitCityState(): void {
@@ -472,6 +534,9 @@ export class GameScene extends Phaser.Scene {
     EventBus.offCommand('cmd:load-daily-challenge', this.handleLoadDailyChallengeCommand);
     EventBus.offCommand('cmd:grant-challenge-reward', this.handleGrantChallengeRewardCommand);
     EventBus.offCommand('cmd:sync-hud-occluders', this.handleSyncHudOccludersCommand);
+    EventBus.offCommand('cmd:set-audio-settings', this.handleSetAudioSettingsCommand);
+    EventBus.offCommand('cmd:unlock-audio', this.handleUnlockAudioCommand);
+    EventBus.offCommand('cmd:play-sfx', this.handlePlaySfxCommand);
   }
 
   public togglePause(): void {
@@ -485,6 +550,10 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.physics.resume();
     }
+
+    // The score ducks while the simulation is suspended; see `GameAudio.setPaused`
+    // for why it is a duck and not a context suspend.
+    this.audio.setPaused(this.isPaused);
 
     // Emit event to React to keep UI pause button & overlay in sync
     EventBus.emitEvent('game:paused-changed', { isPaused: this.isPaused });
@@ -541,6 +610,13 @@ export class GameScene extends Phaser.Scene {
     body.setVelocity(0, 0);
     this.player.setAlpha(1);
 
+    // The wreck is the loudest thing in the game: debris, a wide double ring and
+    // the heaviest shake, with the descending sting a beat behind the blast.
+    this.effects.explosion(this.player.x, this.player.y);
+    this.effects.shake(480, 0.018);
+    this.audio.play('explode');
+    this.time.delayedCall(340, () => this.audio.play('gameOver'));
+
     EventBus.emitEvent('game:run-state-changed', {
       status: 'over',
       reason: 'destroyed',
@@ -574,7 +650,7 @@ export class GameScene extends Phaser.Scene {
       'Hull integrity restored. Security droids recalled to patrol.',
       0x00f0ff
     );
-    this.time.delayedCall(2000, () => this.hideBanner());
+    this.scheduleBannerHide(2000);
   }
 
   /**
@@ -687,7 +763,7 @@ export class GameScene extends Phaser.Scene {
         'This district has no reachable delivery nodes.',
         0xff007f
       );
-      this.time.delayedCall(2500, () => this.hideBanner());
+      this.scheduleBannerHide(2500);
       return;
     }
 
@@ -705,7 +781,7 @@ export class GameScene extends Phaser.Scene {
       0x00f0ff
     );
 
-    this.time.delayedCall(2500, () => this.hideBanner());
+    this.scheduleBannerHide(2500);
   }
 
   private checkInteractions(mission: ActiveMission): void {
@@ -737,6 +813,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onPackagePickedUp(mission: ActiveMission): void {
+    // Captured before the crate is destroyed, so the burst lands where it was
+    // rather than wherever the courier has drifted to by the time it plays.
+    const crateX = this.activePackageDrop?.x ?? this.player.x;
+    const crateY = this.activePackageDrop?.y ?? this.player.y;
+
     this.deliveryManager.pickupPackage();
 
     if (this.activePackageDrop) {
@@ -753,6 +834,8 @@ export class GameScene extends Phaser.Scene {
     this.activeDestinationPad.setDepth(2);
 
     this.cameras.main.flash(200, 0, 240, 255, true);
+    this.effects.pickupBurst(crateX, crateY);
+    this.audio.play('pickup');
 
     this.showBanner(
       'CARGO SECURED - EN ROUTE',
@@ -760,10 +843,15 @@ export class GameScene extends Phaser.Scene {
       0xffaa00
     );
 
-    this.time.delayedCall(2000, () => this.hideBanner());
+    this.scheduleBannerHide(2000);
   }
 
   private onPackageDelivered(): void {
+    // Captured before the pad is destroyed — the celebration belongs where the
+    // handover actually happened.
+    const padX = this.activeDestinationPad?.x ?? this.player.x;
+    const padY = this.activeDestinationPad?.y ?? this.player.y;
+
     this.deliveryManager.completeDelivery();
     const mission = this.deliveryManager.getCurrentMission();
 
@@ -773,6 +861,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.cameras.main.flash(300, 57, 255, 20, true);
+    this.effects.deliveryBurst(padX, padY);
+    this.effects.shake(160, 0.005);
+    this.audio.play('deliver');
 
     const credits = mission?.rewards?.credits ?? 0;
     const bonus = mission?.rewards?.timeBonus ?? 0;
@@ -782,6 +873,13 @@ export class GameScene extends Phaser.Scene {
     // `progression:updated` snapshot, so the HUD updates without any extra wiring here.
     const levelUp = this.progression.recordDelivery(credits, xp);
     const rankNote = levelUp.levelsGained > 0 ? ` // RANK ${levelUp.newLevel} REACHED!` : '';
+
+    // Payout floats up off the pad, and a rank-up adds its own sting behind the
+    // delivery fanfare rather than on top of it.
+    this.effects.floatText(padX, padY - 30, `+¢${credits}`, 0x39ff14);
+    if (levelUp.levelsGained > 0) {
+      this.time.delayedCall(420, () => this.audio.play('rankUp'));
+    }
 
     this.showBanner(
       'DELIVERY COMPLETE!',
@@ -817,6 +915,12 @@ export class GameScene extends Phaser.Scene {
           rewardCredits: challenge.rewardCredits,
           rewardXp: challenge.rewardXp,
         });
+
+        // A completed daily objective is rare, so it earns its own celebration:
+        // a burst on the courier and the long ascending run, a beat after the
+        // delivery fanfare has had room to land.
+        this.effects.deliveryBurst(this.player.x, this.player.y);
+        this.time.delayedCall(650, () => this.audio.play('missionComplete'));
       }
     }
 
@@ -842,7 +946,8 @@ export class GameScene extends Phaser.Scene {
   private onMissionStateChanged(mission: ActiveMission): void {
     if (mission.status === 'failed') {
       this.clearMissionEntities();
-      this.cameras.main.shake(300, 0.01);
+      this.effects.shake(300, 0.01);
+      this.audio.play('missionFailed');
 
       this.showBanner(
         'MISSION FAILED // TIMEOUT',
@@ -1136,12 +1241,60 @@ export class GameScene extends Phaser.Scene {
     this.bannerBg.fillRoundedRect(-320, -36, 640, 72, 8);
     this.bannerBg.strokeRoundedRect(-320, -36, 640, 72, 8);
 
+    // A newer banner supersedes the old one's fade-out *and* its hide timer:
+    // without this, a delayed hide scheduled for the previous banner would blink
+    // the new one away mid-read.
+    this.tweens.killTweensOf(this.notificationBanner);
+    this.cancelBannerHide();
+
     this.notificationBanner.setVisible(true);
-    this.notificationBanner.setAlpha(1);
+    // Pop in from 94% with a slight overshoot, so every announcement lands as an
+    // event rather than as text that was always there.
+    this.notificationBanner.setAlpha(0);
+    this.notificationBanner.setScale(0.94);
+    this.tweens.add({
+      targets: this.notificationBanner,
+      alpha: 1,
+      scale: 1,
+      duration: 260,
+      ease: 'Back.Out',
+    });
   }
 
   private hideBanner(): void {
-    this.notificationBanner.setVisible(false);
+    this.cancelBannerHide();
+    if (!this.notificationBanner.visible) return;
+
+    // Kill the pop-in tween first, so the fade does not fight it for `alpha`.
+    this.tweens.killTweensOf(this.notificationBanner);
+    this.tweens.add({
+      targets: this.notificationBanner,
+      alpha: 0,
+      duration: 180,
+      ease: 'Cubic.In',
+      onComplete: () => this.notificationBanner.setVisible(false),
+    });
+  }
+
+  /**
+   * Hides the current banner after `delayMs` — unless a newer banner replaces it
+   * first, in which case the pending hide is cancelled and the newer message gets
+   * its full reading time.
+   */
+  private scheduleBannerHide(delayMs: number): void {
+    this.cancelBannerHide();
+    this.bannerHideTimer = this.time.delayedCall(delayMs, () => {
+      this.bannerHideTimer = null;
+      this.hideBanner();
+    });
+  }
+
+  private cancelBannerHide(): void {
+    if (this.bannerHideTimer) {
+      // `false` = do not dispatch: the timer is being replaced, not fulfilled.
+      this.bannerHideTimer.remove(false);
+      this.bannerHideTimer = null;
+    }
   }
 
   private createProgrammaticTextures(): void {

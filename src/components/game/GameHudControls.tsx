@@ -1,10 +1,16 @@
 'use client';
 
+import { EventBus } from '@/game/EventBus';
 import { useGameStore } from '@/stores/useGameStore';
 import { useGameBridge } from '@/hooks/useGameBridge';
 import { OCCLUDED_PANEL_CLASS, usePanelOccluded } from '@/hooks/useHudOcclusion';
 import { Pause, Play, RefreshCw, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+/** Interface tick for HUD buttons — silent while muted, so the mute is honoured. */
+function playClick(): void {
+  EventBus.sendCommand('cmd:play-sfx', { name: 'ui' });
+}
 
 /**
  * GameHudControls provides discrete command buttons (Pause, Resume, Reroll, New City)
@@ -28,7 +34,10 @@ export function GameHudControls() {
     >
       {/* Pause / Resume Button */}
       <button
-        onClick={togglePause}
+        onClick={() => {
+          playClick();
+          togglePause();
+        }}
         className={cn(
           'flex items-center gap-1.5 px-3 py-2 rounded-lg font-mono text-xs font-bold transition-all border shadow-lg cursor-pointer',
           isPaused
@@ -43,7 +52,10 @@ export function GameHudControls() {
 
       {/* Restart Mission Button */}
       <button
-        onClick={restartMission}
+        onClick={() => {
+          playClick();
+          restartMission();
+        }}
         className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-mono text-xs font-bold bg-cyber-dark/85 text-zinc-300 border border-cyber-border hover:border-neon-pink/60 hover:text-neon-pink transition-all shadow-lg cursor-pointer"
         title="Reroll / Restart Dispatch Assignment"
       >
@@ -53,7 +65,10 @@ export function GameHudControls() {
 
       {/* Regenerate City Button */}
       <button
-        onClick={() => regenerateCity()}
+        onClick={() => {
+          playClick();
+          regenerateCity();
+        }}
         className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-mono text-xs font-bold bg-cyber-dark/85 text-zinc-300 border border-cyber-border hover:border-neon-cyan/60 hover:text-neon-cyan transition-all shadow-lg cursor-pointer"
         title="Generate a new procedural district (new seed)"
       >

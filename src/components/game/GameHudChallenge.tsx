@@ -99,10 +99,11 @@ export function GameHudChallenge() {
             </span>
           )}
           <span
+            key={completed ? 'challenge-complete' : 'challenge-live'}
             className={cn(
               'px-2 py-0.5 rounded text-[11px] font-bold border',
               completed
-                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hud-pop'
                 : lapsed
                   ? 'bg-neon-pink/15 text-neon-pink border-neon-pink/40'
                   : windowActive

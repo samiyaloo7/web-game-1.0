@@ -70,14 +70,18 @@ export function GameHudMission() {
       className={cn(
         'w-full max-w-lg bg-cyber-dark/85 backdrop-blur-md border rounded-lg p-3 sm:p-4 font-mono shadow-xl transition-[opacity,border-color] duration-300',
         statusConfig.borderColor,
+        // A neon sweep runs once across the panel the moment a delivery lands —
+        // the React-side counterpart of the in-world celebration.
+        status === 'success' && 'hud-sweep',
         isOccluded && OCCLUDED_PANEL_CLASS
       )}
     >
       {/* Header: Status badge & Timer */}
       <div className="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-cyber-border/70">
         <div
+          key={status}
           className={cn(
-            'flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold tracking-wider',
+            'flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold tracking-wider hud-pop',
             statusConfig.badgeBg,
             statusConfig.textColor
           )}

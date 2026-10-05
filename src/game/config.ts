@@ -19,6 +19,12 @@ export function createGameConfig(
     width: GAME_WIDTH,
     height: GAME_HEIGHT,
     backgroundColor: '#0a0c14',
+    // Sound is synthesised by the game's own Web Audio engine (`GameAudio`), so
+    // Phaser's audio manager is switched off entirely: one AudioContext, one set
+    // of autoplay rules to obey, and no idle sound plugin holding a device open.
+    audio: {
+      noAudio: true,
+    },
     scale: {
       mode: Phaser.Scale.FIT, // Scales proportionally to fit the parent container
       autoCenter: Phaser.Scale.CENTER_BOTH,

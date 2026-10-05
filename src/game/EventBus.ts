@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import type { ProgressionSnapshot, ProgressionState } from './types/progression';
 import type { ChallengeProgressSnapshot, DailyChallenge } from './types/challenge';
 import type { Occluder } from './systems/HudOcclusion';
+import type { AudioSettings } from './audio/AudioSettings';
+import type { SfxName } from './audio/GameAudio';
 
 
 /**
@@ -44,6 +46,19 @@ export interface GameToUiEvents {
   /** Emitted when game pause state toggles */
   'game:paused-changed': {
     isPaused: boolean;
+  };
+  /**
+   * Audio engine status, mirrored outward whenever it actually changes: the first
+   * successful unlock, a mute, or the score starting/stopping.
+   *
+   * `unlocked` is the browser-autoplay handshake. While it is `false` the HUD
+   * offers "click to enable audio", so a silent game explains itself instead of
+   * looking broken.
+   */
+  'audio:state-changed': {
+    unlocked: boolean;
+    musicPlaying: boolean;
+    muted: boolean;
   };
   /** Emitted when a new city has been generated, carrying its seed for replay */
   'city:generated': {
@@ -221,6 +236,21 @@ export interface UiToGameCommands {
     challengeId: string;
     credits: number;
     xp: number;
+  };
+  /**
+   * Push the HUD's audio settings into the engine (and, through the engine, into
+   * the live gain nodes). Sent by `useAudioSettings` on hydrate and on every
+   * slider/toggle change; the engine sanitises again before applying.
+   */
+  'cmd:set-audio-settings': AudioSettings;
+  /**
+   * A real user gesture has happened, so the AudioContext may try to start.
+   * This is the only path that can flip `audio:state-changed.unlocked` to true.
+   */
+  'cmd:unlock-audio': void;
+  /** Fire a named one-shot from the React side (interface ticks and the like). */
+  'cmd:play-sfx': {
+    name: SfxName;
   };
 }
 

@@ -5,12 +5,14 @@ import type Phaser from 'phaser';
 import { GameHudStats } from './GameHudStats';
 import { GameHudMission } from './GameHudMission';
 import { GameHudControls } from './GameHudControls';
+import { GameHudAudio } from './GameHudAudio';
 import { GameHudVitals } from './GameHudVitals';
 import { GameHudChallenge } from './GameHudChallenge';
 import { GameOverOverlay } from './GameOverOverlay';
 import { PauseOverlay } from './PauseOverlay';
 import { useGameBridge } from '@/hooks/useGameBridge';
 import { useHudOcclusion } from '@/hooks/useHudOcclusion';
+import { useAudioSettings } from '@/hooks/useAudioSettings';
 import { useProgressionSync } from '@/hooks/useProgressionSync';
 import { useScoreReporting } from '@/hooks/useScoreReporting';
 import { useDailyChallenge } from '@/hooks/useDailyChallenge';
@@ -48,6 +50,10 @@ export function GameView() {
   // Report where the HUD panels actually rendered, so the scene can tell when one of
   // them is covering the parcel or the drop pad.
   useHudOcclusion(rootRef);
+
+  // Hydrate the audio preferences, push edits into the engine, and offer the first
+  // user gesture to the browser's autoplay policy.
+  useAudioSettings();
 
   // Hydrate the career from Supabase on mount and persist changes back.
   // No-ops entirely for guests, so an unconfigured project still plays.
@@ -111,10 +117,11 @@ export function GameView() {
           <GameHudVitals />
         </div>
 
-        {/* Right: Currency / XP / Score & Controls */}
+        {/* Right: Currency / XP / Score, Controls & Audio */}
         <div className="pointer-events-auto flex flex-col items-end gap-2 w-full sm:w-auto">
           <GameHudStats />
           <GameHudControls />
+          <GameHudAudio />
         </div>
       </div>
 

@@ -3,6 +3,10 @@ import { GameToUiEvents } from '@/game/EventBus';
 import { xpToAdvance } from '@/game/systems/ProgressionMath';
 import { DEFAULT_BASE_STATS, STARTING_MONEY } from '@/game/types/progression';
 import { EMPTY_CHALLENGE_SNAPSHOT } from '@/game/types/challenge';
+import {
+  DEFAULT_AUDIO_SETTINGS,
+  type AudioSettings,
+} from '@/game/audio/AudioSettings';
 import type { ChallengeProgressSnapshot } from '@/game/types/challenge';
 import type { ProgressionSnapshot } from '@/game/types/progression';
 
@@ -100,6 +104,21 @@ interface GameStoreState {
   // Engine ready flag
   isEngineReady: boolean;
   /**
+   * Audio preferences as the HUD edits them.
+   *
+   * UI state, hydrated from localStorage by `useAudioSettings` and pushed into the
+   * engine over `cmd:set-audio-settings`. The engine sanitises on its side too, so
+   * a stale or hand-edited value can never reach the gain nodes unchecked.
+   */
+  audio: AudioSettings;
+  /**
+   * False until the browser's autoplay policy has allowed the AudioContext to run.
+   *
+   * Driven by `audio:state-changed`, never by React guessing — only the engine can
+   * tell whether a `resume()` actually took.
+   */
+  audioUnlocked: boolean;
+  /**
    * Persistence health, surfaced by the HUD so a courier can tell "saved" from
    * "silently not saving". UI state only — the authoritative career always lives
    * in the game's `PlayerProgression`.
@@ -147,6 +166,11 @@ interface GameStoreState {
   setRunState: (run: GameToUiEvents['game:run-state-changed']) => void;
   setIsPaused: (isPaused: boolean) => void;
   setIsEngineReady: (isReady: boolean) => void;
+
+  /** Replaces the audio preferences wholesale (hydrate, or any slider change). */
+  setAudioSettings: (audio: AudioSettings) => void;
+  /** Mirrors the engine's autoplay handshake. */
+  setAudioUnlocked: (audioUnlocked: boolean) => void;
   setSyncStatus: (status: GameStoreState['syncStatus']) => void;
   setIsNewPersonalBest: (isNewBest: boolean) => void;
   setOccludedPanelIds: (occludedPanelIds: string[]) => void;
@@ -233,6 +257,8 @@ export const useGameStore = create<GameStoreState>((set) => ({
   run: initialRun,
   isPaused: false,
   isEngineReady: false,
+  audio: { ...DEFAULT_AUDIO_SETTINGS },
+  audioUnlocked: false,
   syncStatus: 'idle',
   isNewPersonalBest: false,
   occludedPanelIds: [],
@@ -277,6 +303,10 @@ export const useGameStore = create<GameStoreState>((set) => ({
   setIsPaused: (isPaused) => set({ isPaused }),
 
   setIsEngineReady: (isReady) => set({ isEngineReady: isReady }),
+
+  setAudioSettings: (audio) => set({ audio: { ...audio } }),
+
+  setAudioUnlocked: (audioUnlocked) => set({ audioUnlocked }),
 
   setSyncStatus: (syncStatus) => set({ syncStatus }),
 

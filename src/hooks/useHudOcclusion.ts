@@ -26,6 +26,7 @@ export type HudPanelId =
   | 'hud-vitals'
   | 'hud-stats'
   | 'hud-controls'
+  | 'hud-audio'
   | 'hud-challenge';
 
 /**
