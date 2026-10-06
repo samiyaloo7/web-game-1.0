@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Zap, Gamepad2, Trophy, User, LogIn, LogOut, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { ConnectivityBadge } from "@/components/pwa/ConnectivityBadge";
 
 interface NavItem {
   label: string;
@@ -103,6 +104,10 @@ export function Navbar() {
               <span className="hidden sm:inline">{isConfigured ? "Jack In" : "Offline"}</span>
             </Link>
           )}
+          {/* Connectivity + outbox depth. Mounted here rather than over the canvas
+              so it is always visible (every route renders the navbar) and never
+              occludes the dispatch console HUD. */}
+          <ConnectivityBadge />
         </div>
       </div>
     </header>

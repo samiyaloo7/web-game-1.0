@@ -6,6 +6,8 @@ import { useGameStore } from '@/stores/useGameStore';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { fetchTodayChallenge, reportChallengeProgress } from '@/lib/challenges/client';
 import type { TodayChallengePayload } from '@/lib/challenges/client';
+import { enqueueChallengeProgress } from '@/lib/offline/outbox';
+import { readChallengeCache, writeChallengeCache } from '@/lib/offline/queue';
 import type { ChallengeProgressSnapshot } from '@/game/types/challenge';
 
 /**
@@ -56,10 +58,16 @@ export function useDailyChallenge(): { refresh: () => Promise<void> } {
     const result = await fetchTodayChallenge();
 
     if (!result.ok) {
+      // No uplink: fall back to the last payload this browser saw. When the
+      // days differ the panel renders a stale-but-labelled card; the progress
+      // report still verifies against the server clock on reconnect.
+      const cached = readChallengeCache();
+      if (cached) setToday(cached.payload);
       setChallengeSyncStatus(isConfigured ? 'error' : 'offline');
       return;
     }
 
+    writeChallengeCache(result.data);
     setToday(result.data);
 
     // A successful fetch clears a previous failure, but must not overwrite
@@ -172,9 +180,23 @@ export function useDailyChallenge(): { refresh: () => Promise<void> } {
             // must never apply this progress to tomorrow's objective.
             setChallengeSyncStatus('idle');
             void load();
-          } else {
-            setChallengeSyncStatus('error');
+            return;
           }
+
+          if (
+            user &&
+            (result.status === undefined || result.status === 429 || result.status >= 500)
+          ) {
+            // Transport failure, rate limit, or server fault: the run is still
+            // valid, so it waits in the outbox for the reconnect flush — which
+            // replays it through the same server-priced endpoint.
+            enqueueChallengeProgress(user.id, {
+              challengeId: event.challengeId,
+              dayIndex: event.dayIndex,
+              progress: event.progress,
+            });
+          }
+          setChallengeSyncStatus('error');
           return;
         }
 
@@ -183,6 +205,17 @@ export function useDailyChallenge(): { refresh: () => Promise<void> } {
           grant(event.challengeId, result.rewardCredits, result.rewardXp);
         }
         setChallengeSyncStatus('granted');
+      } catch {
+        // Never reached the server (offline, DNS, aborted): the completion is
+        // still valid, so it waits in the outbox for the reconnect flush.
+        if (user) {
+          enqueueChallengeProgress(user.id, {
+            challengeId: event.challengeId,
+            dayIndex: event.dayIndex,
+            progress: event.progress,
+          });
+        }
+        setChallengeSyncStatus('error');
       } finally {
         completionInFlightRef.current = false;
       }
@@ -196,16 +229,26 @@ export function useDailyChallenge(): { refresh: () => Promise<void> } {
 
   // Partial progress: reported so the history list shows a real number even when
   // the objective was not met. Debounced, and never for a completed challenge —
-  // completion has its own path above.
+  // completion has its own path above. A failed report waits in the outbox for
+  // the reconnect flush; the challenge op is idempotent progress, so sending it
+  // again later can only ever raise the stored counter, never double-pay.
   useEffect(() => {
     const handleProgress = (snapshot: ChallengeProgressSnapshot) => {
       if (!user || !isConfigured || !snapshot.challengeId || snapshot.completed) return;
-      if (snapshot.bestProgress <= reportedRef.current) return;
+      if (snapshot.dayIndex === null || snapshot.bestProgress <= reportedRef.current) return;
 
       reportedRef.current = snapshot.bestProgress;
       if (reportTimerRef.current) clearTimeout(reportTimerRef.current);
+      const dayIndex: number = snapshot.dayIndex;
+      const progress = snapshot.bestProgress;
+      const challengeId: string = snapshot.challengeId;
       reportTimerRef.current = setTimeout(() => {
-        void reportChallengeProgress(snapshot.dayIndex ?? 0, snapshot.bestProgress);
+        void reportChallengeProgress(dayIndex, progress).then((result) => {
+          if (result.ok) return;
+          if (result.stale) return;
+          if (result.status !== undefined && result.status !== 429 && result.status < 500) return;
+          enqueueChallengeProgress(user.id, { challengeId, dayIndex, progress });
+        });
       }, 1_200);
     };
 

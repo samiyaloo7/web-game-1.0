@@ -119,6 +119,17 @@ interface GameStoreState {
    */
   audioUnlocked: boolean;
   /**
+   * Connectivity, mirrored from `navigator.onLine` plus the `online`/`offline`
+   * events. UI state only: every network call still fails on its own merits, so
+   * a stale value here can delay a retry but can never authorise anything.
+   */
+  isOnline: boolean;
+  /**
+   * How many offline operations are waiting to be replayed (scores and daily
+   * challenge progress). Driven by `useOfflineSync` after every outbox change.
+   */
+  pendingSyncCount: number;
+  /**
    * Persistence health, surfaced by the HUD so a courier can tell "saved" from
    * "silently not saving". UI state only — the authoritative career always lives
    * in the game's `PlayerProgression`.
@@ -166,6 +177,11 @@ interface GameStoreState {
   setRunState: (run: GameToUiEvents['game:run-state-changed']) => void;
   setIsPaused: (isPaused: boolean) => void;
   setIsEngineReady: (isReady: boolean) => void;
+
+  /** Mirrors `navigator.onLine`; see the field's docblock for why it is UI-only. */
+  setIsOnline: (isOnline: boolean) => void;
+  /** Outbox depth, republished whenever an operation is enqueued or replayed. */
+  setPendingSyncCount: (pendingSyncCount: number) => void;
 
   /** Replaces the audio preferences wholesale (hydrate, or any slider change). */
   setAudioSettings: (audio: AudioSettings) => void;
@@ -259,6 +275,8 @@ export const useGameStore = create<GameStoreState>((set) => ({
   isEngineReady: false,
   audio: { ...DEFAULT_AUDIO_SETTINGS },
   audioUnlocked: false,
+  isOnline: true,
+  pendingSyncCount: 0,
   syncStatus: 'idle',
   isNewPersonalBest: false,
   occludedPanelIds: [],
@@ -307,6 +325,10 @@ export const useGameStore = create<GameStoreState>((set) => ({
   setAudioSettings: (audio) => set({ audio: { ...audio } }),
 
   setAudioUnlocked: (audioUnlocked) => set({ audioUnlocked }),
+
+  setIsOnline: (isOnline) => set({ isOnline }),
+
+  setPendingSyncCount: (pendingSyncCount) => set({ pendingSyncCount }),
 
   setSyncStatus: (syncStatus) => set({ syncStatus }),
 

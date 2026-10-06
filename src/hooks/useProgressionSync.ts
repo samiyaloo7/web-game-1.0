@@ -5,6 +5,11 @@ import { EventBus } from '@/game/EventBus';
 import { useGameStore } from '@/stores/useGameStore';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { savePlayerProgression } from '@/lib/progression/client';
+import {
+  MAX_PENDING_PROGRESSION_AGE_MS,
+  readPendingProgression,
+  writePendingProgression,
+} from '@/lib/offline/queue';
 import { fromProgressRow } from '@/lib/progression/mapping';
 import type { ProgressionSnapshot, ProgressionState } from '@/game/types/progression';
 
@@ -53,6 +58,22 @@ export function useProgressionSync() {
   const pendingRef = useRef<ProgressionState | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSavingRef = useRef(false);
+  /** True while the dirty snapshot is the one we just read — not something we changed. */
+  const suppressPersistRef = useRef(false);
+
+  const persistPending = useCallback((state: ProgressionState | null) => {
+    // Durability: the debounced snapshot outlives the tab, so closing the
+    // browser mid-outage cannot silently delete the run's earnings. Persisting
+    // is gated on *our own* change — a snapshot we just loaded from the server
+    // is never echoed back, which is how two devices stop clobbering each other
+    // on every visit.
+    if (state === null) {
+      writePendingProgression(null);
+      return;
+    }
+    if (suppressPersistRef.current) return;
+    writePendingProgression(state);
+  }, []);
 
   const flush = useCallback(async () => {
     if (isSavingRef.current) return;
@@ -70,7 +91,20 @@ export function useProgressionSync() {
         pendingRef.current = null;
 
         const result = await savePlayerProgression(state);
-        lastStatus = result.ok ? 'saved' : 'error';
+        if (result.ok) {
+          lastStatus = 'saved';
+          // The snapshot landed: the crash-recovery copy is no longer needed.
+          // (A change queued mid-flight stays in the ref and keeps its copy.)
+          if (pendingRef.current === null) writePendingProgression(null);
+        } else {
+          // Keep the snapshot around so the next online pass — or the next
+          // session after a reload — can retry it. It is the latest absolute
+          // state, so holding it loses nothing.
+          pendingRef.current = state;
+          persistPending(state);
+          lastStatus = 'error';
+          break;
+        }
       }
 
       if (lastStatus) {
@@ -79,32 +113,49 @@ export function useProgressionSync() {
     } finally {
       isSavingRef.current = false;
     }
-  }, []);
+  }, [persistPending]);
 
   const scheduleSave = useCallback(
     (state: ProgressionState) => {
       pendingRef.current = state;
+      persistPending(state);
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         timerRef.current = null;
         void flush();
       }, SAVE_DEBOUNCE_MS);
     },
-    [flush],
+    [flush, persistPending],
   );
 
   // Load the persisted career once per signed-in user, and reset the mirror when
-  // the user signs out so the next account does not inherit the last one's HUD.
+  // the user changes so the next account does not inherit the last one's HUD —
+  // or its unsaved snapshot.
+  const activeUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!user) {
+      activeUserIdRef.current = null;
       useGameStore.setState({ syncStatus: 'offline' });
       pendingRef.current = null;
+      writePendingProgression(null);
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
       return;
     }
+
+    if (activeUserIdRef.current !== null && activeUserIdRef.current !== user.id) {
+      // Account switch in one tab: the stored snapshot belongs to the previous
+      // courier, and saving it under the new session would corrupt their career.
+      pendingRef.current = null;
+      writePendingProgression(null);
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    activeUserIdRef.current = user.id;
 
     let cancelled = false;
 
@@ -125,15 +176,54 @@ export function useProgressionSync() {
 
       // Send the career INTO the game. The scene owns it from here; the game
       // re-derives rank and stats itself and never trusts a stored level.
-      EventBus.sendCommand('cmd:load-progression', {
-        state: fromProgressRow({ money: data.money, xp: data.xp, upgrades: data.upgrades }),
+      const serverState = fromProgressRow({
+        money: data.money,
+        xp: data.xp,
+        upgrades: data.upgrades,
       });
+
+      // Conflict handling, last-writer-wins with a freshness bound: if this
+      // browser holds an unsaved snapshot from a previous offline session, it
+      // is the newer truth — the server row predates the outage. A snapshot
+      // older than the staleness bound is discarded instead, so a month-old
+      // wallet can never flush over what another device has since earned.
+      // Either way, what the game receives is exactly what it would have seen
+      // had there been no outage at all.
+      const pending = readPendingProgression();
+      const pendingIsFresh =
+        pending !== null && Date.now() - pending.queuedAt <= MAX_PENDING_PROGRESSION_AGE_MS;
+      if (!pendingIsFresh && pending !== null) {
+        // Stale: drop it so it can never clobber the server's newer truth.
+        writePendingProgression(null);
+      }
+      const initial = pendingIsFresh ? pending.state : serverState;
+
+      // Mark the handoff so the persistence gate below does not echo the loaded
+      // snapshot straight back to storage as if we had changed it.
+      suppressPersistRef.current = true;
+      try {
+        EventBus.sendCommand('cmd:load-progression', { state: initial });
+      } finally {
+        suppressPersistRef.current = false;
+      }
+
+      if (pendingIsFresh) {
+        // The game now owns the recovered snapshot; re-arm it for saving so
+        // the next online pass flushes it, then clears the stored copy.
+        pendingRef.current = pending.state;
+        if (timerRef.current !== null) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          void flush();
+        }, SAVE_DEBOUNCE_MS);
+        useGameStore.setState({ syncStatus: 'saving' });
+      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, flush]);
 
   // Mirror every career change into UI state, and queue a save.
   useEffect(() => {

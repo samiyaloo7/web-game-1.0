@@ -67,7 +67,21 @@ export type ReportProgressResult =
       rewardCredits: number;
       rewardXp: number;
     }
-  | { ok: false; stale: boolean; error: string };
+  | {
+      ok: false;
+      stale: boolean;
+      error: string;
+      /**
+       * HTTP status when the server answered, `undefined` when it did not.
+       *
+       * The offline replay loop needs this to tell "the uplink is down" (retry,
+       * count an attempt) from "401/429 — this will resolve on its own" (hold,
+       * do not burn an attempt) from "400 — the record will never be accepted"
+       * (drop). Without it every failure looks the same and a queue would either
+       * drop too eagerly or retry forever.
+       */
+      status?: number;
+    };
 
 /**
  * Reports how far the current attempt got.
@@ -93,6 +107,7 @@ export async function reportChallengeProgress(
       return {
         ok: false,
         stale: true,
+        status: response.status,
         error: typeof body.error === 'string' ? body.error : 'The challenge day rolled over.',
       };
     }
@@ -101,6 +116,7 @@ export async function reportChallengeProgress(
       return {
         ok: false,
         stale: false,
+        status: response.status,
         error: typeof body.error === 'string' ? body.error : `Uplink error ${response.status}`,
       };
     }
